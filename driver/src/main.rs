@@ -1,6 +1,6 @@
 use std::env::{args, current_exe};
 use std::fs::File;
-use std::process::Command;
+use std::process::{exit, Command};
 
 use log::{debug, info, warn};
 use simplelog::{CombinedLogger, Config, LevelFilter, WriteLogger};
@@ -18,35 +18,43 @@ fn cargo() -> Command {
 fn main() {
     let ld_library_path = init();
 
-    info!(
+    debug!(
         "startup command line: {:?}",
         args().collect::<Vec<String>>()
     );
+
+    debug!("Library Path: {:?}", ld_library_path);
 
     let args = args().collect::<Vec<String>>();
     if args.len() >= 3 {
         debug!("Long args: {args:?}");
 
-        let mut cmd = if args[2] == "-" {
-            debug!("Use rustc");
-            let cmd = Command::new(&args[1]);
-            cmd
+        let output = if args[2] == "-" {
+            debug!("Use rustc, inherit std");
+            Command::new(&args[1])
+                .args(&args[2..])
+                .spawn()
+                .expect("Fatal, cannot run rustc")
+                .wait_with_output()
+                .expect("Fatal, cannot fetch output")
         } else {
-            debug!("Use audit");
-            let mut cmd = audit();
-            cmd.env("LD_LIBRARY_PATH", ld_library_path);
-            cmd
+            debug!("Use audit, use pipe");
+            audit()
+                .args(&args[2..])
+                .env("LD_LIBRARY_PATH", ld_library_path)
+                .output()
+                .expect("Fatal, cannot fetch output")
         };
 
-        cmd.args(&args[2..]);
+        info!("Stdout: {:?}", String::from_utf8_lossy(&output.stdout));
+        info!("Stderr: {:?}", String::from_utf8_lossy(&output.stderr));
 
-        let output = cmd.spawn().unwrap().wait_with_output().unwrap();
-
-        debug!("Stdout: {:?}", String::from_utf8_lossy(&output.stdout));
-        debug!("Stderr: {:?}", String::from_utf8_lossy(&output.stderr));
+        exit(output.status.code().unwrap_or(0))
     } else {
         warn!("Exec cargo_wrapper, this function shall be exec only once globally!");
-        cargo_wrapper()
+        cargo_wrapper();
+
+        exit(0)
     }
 }
 
@@ -75,7 +83,7 @@ fn init() -> String {
         //     ColorChoice::Auto,
         // ),
         WriteLogger::new(
-            LevelFilter::Debug,
+            LevelFilter::Info,
             Config::default(),
             File::options()
                 .write(true)
@@ -100,8 +108,10 @@ fn init() -> String {
         panic!("Fatal, cannot fetch rustup home")
     };
 
-    let rustup_dir =
-        format!("{rustup_home}/toolchains/nightly-2023-12-12-x86_64-unknown-linux-gnu");
+    let rustup_dir = format!(
+        "{}/toolchains/nightly-2023-12-12-x86_64-unknown-linux-gnu",
+        rustup_home.trim()
+    );
     let lib_dir1 = format!("{rustup_dir}/lib/rustlib/x86_64-unknown-linux-gnu/lib");
     let lib_dir2 = format!("{rustup_dir}/lib");
 
