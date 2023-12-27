@@ -1,5 +1,4 @@
 #![feature(rustc_private)]
-#![feature(decl_macro)]
 
 extern crate rustc_ast;
 extern crate rustc_codegen_ssa;
