@@ -18,7 +18,7 @@ fn cargo() -> Command {
 fn main() {
     let ld_library_path = init();
 
-    debug!(
+    info!(
         "startup command line: {:?}",
         args().collect::<Vec<String>>()
     );
@@ -46,8 +46,8 @@ fn main() {
                 .expect("Fatal, cannot fetch output")
         };
 
-        info!("Stdout: {:?}", String::from_utf8_lossy(&output.stdout));
-        info!("Stderr: {:?}", String::from_utf8_lossy(&output.stderr));
+        debug!("Stdout: {:?}", String::from_utf8_lossy(&output.stdout));
+        debug!("Stderr: {:?}", String::from_utf8_lossy(&output.stderr));
 
         exit(output.status.code().unwrap_or(0))
     } else {
@@ -58,6 +58,8 @@ fn main() {
     }
 }
 
+/// Create a wrapper around cargo and rustc, 
+/// this function shall be called only once, at first layer.
 fn cargo_wrapper() {
     let mut cmd = cargo();
     cmd.arg("rustc");
@@ -74,6 +76,7 @@ fn cargo_wrapper() {
     // TODO: status
 }
 
+/// Do some init things.
 fn init() -> String {
     CombinedLogger::init(vec![
         // TermLogger::new(
