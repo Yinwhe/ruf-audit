@@ -1,5 +1,7 @@
 #![feature(rustc_private)]
 
+use std::process::exit;
+
 extern crate rustc_ast;
 extern crate rustc_codegen_ssa;
 extern crate rustc_data_structures;
@@ -18,8 +20,10 @@ extern crate rustc_session;
 extern crate rustc_span;
 extern crate rustc_target;
 
-mod utils76;
+mod rustc76;
 
 fn main() {
-    let exit_code = utils76::run_rustc();
+    let exit_code = rustc76::run_rustc();
+
+    exit(exit_code)
 }

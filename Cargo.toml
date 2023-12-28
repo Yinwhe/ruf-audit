@@ -1,6 +1,7 @@
 [workspace]
 members = [
-    "audit",
-    "wrapper"
+    "ruf_scanner",
+    "ruf_audit",
+    "deps/features",
 ]
 resolver = "2"

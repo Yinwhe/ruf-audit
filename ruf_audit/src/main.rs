@@ -5,9 +5,9 @@ use std::process::{exit, Command};
 use log::{debug, info, warn};
 use simplelog::{CombinedLogger, Config, LevelFilter, WriteLogger};
 
-fn audit() -> Command {
+fn scan() -> Command {
     let mut path = current_exe().expect("current executable path invalid");
-    path.set_file_name("audit");
+    path.set_file_name("ruf_scanner");
     Command::new(path)
 }
 
@@ -39,7 +39,7 @@ fn main() {
                 .expect("Fatal, cannot fetch output")
         } else {
             debug!("Use audit, use pipe");
-            audit()
+            scan()
                 .args(&args[2..])
                 .env("LD_LIBRARY_PATH", ld_library_path)
                 .output()
@@ -86,7 +86,7 @@ fn init() -> String {
         //     ColorChoice::Auto,
         // ),
         WriteLogger::new(
-            LevelFilter::Info,
+            LevelFilter::Debug,
             Config::default(),
             File::options()
                 .write(true)

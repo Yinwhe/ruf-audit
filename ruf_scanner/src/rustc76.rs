@@ -50,6 +50,9 @@ fn run_compiler(
 
     let sopts = config::build_session_options(&mut default_handler, &matches);
 
+    let crate_name = matches.opt_strs("crate-name");
+    assert!(crate_name.len() == 1, "Fatal, fetch crate name errors");
+
     let mut config = interface::Config {
         opts: sopts,
         crate_cfg: matches.opt_strs("cfg"),
@@ -101,8 +104,8 @@ fn run_compiler(
             handler.early_error("no input filename given"); // this is fatal
         }
 
-        compiler.enter(|queries| {
-            let early_exit = || sess.compile_status();
+        let features = compiler.enter(|queries| {
+            let early_exit = || sess.compile_status().map(|_| None);
 
             queries.parse()?;
 
@@ -116,13 +119,20 @@ fn run_compiler(
                 return early_exit();
             }
 
-            queries.global_ctxt()?.enter(|tcx| {
-                let features = tcx.features();
-                println!("{:?}", features.declared_features);
-            });
+            let f = queries
+                .global_ctxt()?
+                .enter(|tcx| tcx.features().declared_features.clone());
 
-            Ok(())
+            Ok(Some(f))
         })?;
+
+        if let Some(mut features) = features {
+            // TODO
+            let features = features
+                .drain()
+                .map(|sym| sym.to_string())
+                .collect::<Vec<String>>();
+        }
 
         Ok(())
     })
