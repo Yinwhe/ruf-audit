@@ -13,5 +13,5 @@ ruf_audit # Please run this cli in the root of crates
 ```
 
 TODO:
-[x] Scan and extract rufs
-[] Analyze and choose suitable deps
+- [x] Scan and extract rufs
+- [ ] Analyze and choose suitable deps
