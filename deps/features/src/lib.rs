@@ -4,9 +4,9 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Features {
-    crate_name: String,
+    pub crate_name: String,
     // file_path: String,
-    features: Vec<String>,
+    pub features: Vec<String>,
 }
 
 impl Features {
@@ -25,6 +25,18 @@ impl Display for Features {
             "\nFDelimiter::{{{}}}::FDelimiter\n",
             serde_json::to_string(&self).expect("Fatal, serialize fails")
         )
+    }
+}
+
+impl Into<String> for Features {
+    fn into(self) -> String {
+        format!("{self}")
+    }
+}
+
+impl From<&str> for Features {
+    fn from(value: &str) -> Self {
+        serde_json::from_str(&value).expect("Fatal, deserialize fails")
     }
 }
 

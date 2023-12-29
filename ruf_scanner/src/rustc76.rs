@@ -4,6 +4,7 @@ use std::io::{self, Read};
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use features::Features;
 use rustc_driver::{
     args, catch_with_exit_code, diagnostics_registry, handle_options, Callbacks, Compilation,
     TimePassesCallbacks, DEFAULT_LOCALE_RESOURCES,
@@ -50,7 +51,7 @@ fn run_compiler(
 
     let sopts = config::build_session_options(&mut default_handler, &matches);
 
-    let crate_name = matches.opt_strs("crate-name");
+    let crate_name: Vec<String> = matches.opt_strs("crate-name");
     assert!(crate_name.len() == 1, "Fatal, fetch crate name errors");
 
     let mut config = interface::Config {
@@ -128,10 +129,13 @@ fn run_compiler(
 
         if let Some(mut features) = features {
             // TODO
-            let features = features
-                .drain()
-                .map(|sym| sym.to_string())
-                .collect::<Vec<String>>();
+            let features: Vec<String> = features.drain().map(|sym| sym.to_string()).collect();
+            let crate_name = crate_name.first().unwrap().clone();
+
+            // Print the featuers
+            if !features.is_empty() {
+                println!("{}", Features::new(crate_name, features));
+            }
         }
 
         Ok(())
