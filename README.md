@@ -2,7 +2,13 @@
 Audit ruf usage in crates
 
 # Usage
-You can build with:
+Before buid, please add needed env:
+```bash
+rustup toolchain install nightly-2023-12-12
+rustup component add rustc-dev llvm-tools
+```
+
+And then you can build with:
 ```bash
 cargo build
 ```
