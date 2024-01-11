@@ -1,7 +1,11 @@
 [workspace]
 members = [
-    "ruf_scanner",
-    "ruf_audit",
-    "deps/features",
+    "scanner",
+    "audit",
+    "deps/features", "deps/db_usage", "deps/lifetime",
 ]
+exclude = [
+    "test"
+]
+
 resolver = "2"

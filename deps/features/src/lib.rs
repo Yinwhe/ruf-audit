@@ -3,22 +3,41 @@ use std::fmt::Display;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Features {
-    pub crate_name: String,
-    // file_path: String,
-    pub features: Vec<String>,
+pub struct Ruf {
+    pub cond: Option<String>,
+    pub feature: String,
 }
 
-impl Features {
-    pub fn new(crate_name: String, features: Vec<String>) -> Self {
-        Features {
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Rufs {
+    pub crate_name: String,
+    pub rufs: Vec<Ruf>,
+}
+
+impl Ruf {
+    pub fn new(cond: Option<String>, feature: String) -> Self {
+        Ruf { cond, feature }
+    }
+}
+
+impl Rufs {
+    pub fn new(crate_name: String, rufs: Vec<Ruf>) -> Self {
+        Rufs { crate_name, rufs }
+    }
+
+    pub fn from_vec(crate_name: String, no_cond_rufs: Vec<String>) -> Self {
+        let mut rufs_vec = Vec::new();
+        for ruf in no_cond_rufs {
+            rufs_vec.push(Ruf::new(None, ruf));
+        }
+        Rufs {
             crate_name,
-            features,
+            rufs: rufs_vec,
         }
     }
 }
 
-impl Display for Features {
+impl Display for Rufs {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -28,21 +47,14 @@ impl Display for Features {
     }
 }
 
-impl Into<String> for Features {
+impl Into<String> for Rufs {
     fn into(self) -> String {
         format!("{self}")
     }
 }
 
-impl From<&str> for Features {
+impl From<&str> for Rufs {
     fn from(value: &str) -> Self {
         serde_json::from_str(&value).expect("Fatal, deserialize fails")
     }
-}
-
-#[test]
-fn test() {
-    let f = Features::new("Test".into(), vec!["Test1".into(), "Test2".into()]);
-
-    println!("{f}");
 }

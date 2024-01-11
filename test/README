@@ -1,0 +1,7 @@
+We create a simple test case here:
+```
+root (thread_local)
+ |-- dep1 (linkage)
+ `-- dep2 (imported_main)
+     `-- dep3 (deprecated_safe)
+```

@@ -6,7 +6,7 @@ use std::process::{Command, Stdio};
 use std::thread;
 
 use ansi_term::{Color, Style};
-use features::Features;
+use features::Rufs;
 use lazy_static::lazy_static;
 use log::debug;
 use regex::Regex;
@@ -16,7 +16,8 @@ use super::cargo;
 
 lazy_static! {
     static ref RE_FEATURES: Regex = Regex::new(r"FDelimiter::\{(.*?)\}::FDelimiter").unwrap();
-    static ref RE_INFOS: Regex = Regex::new(r"\s+Compiling\s+(\w+)\s+v([\d.]+)\s+\((.*?)\)").unwrap();
+    static ref RE_INFOS: Regex =
+        Regex::new(r"\s+Compiling\s+(\w+)\s+v([\d.]+)\s+\((.*?)\)").unwrap();
     static ref BOLD_RED: Style = Style::new().bold().fg(Color::Red);
     static ref BOLD_GREEN: Style = Style::new().bold().fg(Color::Green);
 }
@@ -50,11 +51,14 @@ pub fn cargo_wrapper() -> i32 {
             let line = line.expect("Fatal, get stdout line fails");
 
             if let Some(caps) = RE_FEATURES.captures(&line) {
-                let features = Features::from(caps.get(1).map_or("Compiling...", |m| m.as_str()));
+                let rufs = Rufs::from(caps.get(1).expect("Fatal, resolve ruf fails").as_str());
                 used_features
-                    .entry(features.crate_name)
+                    .entry(rufs.crate_name)
                     .or_insert_with(HashSet::new)
-                    .extend(features.features);
+                    .extend(rufs.rufs.into_iter().map(|ruf| {
+                        assert!(ruf.cond.is_none());
+                        ruf.feature
+                    }));
             }
         }
 
@@ -107,7 +111,7 @@ pub fn init() -> String {
                 .write(true)
                 .append(true)
                 .create(true)
-                .open("/home/ubuntu/Workspace/ruf-audit/debug.log")
+                .open("/Users/wyffeiwhe/Desktop/Research/RustRUF/ruf-audit/debug.log")
                 .unwrap(),
         ),
     ])

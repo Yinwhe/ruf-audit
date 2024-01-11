@@ -4,7 +4,7 @@ use std::io::{self, Read};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use features::Features;
+use features::Rufs;
 use rustc_driver::{
     args, catch_with_exit_code, diagnostics_registry, handle_options, Callbacks, Compilation,
     TimePassesCallbacks, DEFAULT_LOCALE_RESOURCES,
@@ -134,7 +134,7 @@ fn run_compiler(
 
             // Print the featuers
             if !features.is_empty() {
-                println!("{}", Features::new(crate_name, features));
+                println!("{}", Rufs::from_vec(crate_name, features));
             }
         }
 
