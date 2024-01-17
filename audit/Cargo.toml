@@ -8,7 +8,11 @@ edition = "2021"
 [dependencies]
 log = "0.4.20"
 simplelog = "0.12.1"
-features = { path = "../deps/features"} 
 regex = "1.10.2"
 lazy_static = "1.4.0"
 ansi_term = "0.12.1"
+fxhash = "0.2.1"
+
+features = { path = "../deps/features" } 
+lockfile = { path = "../deps/lockfile" }
+lifetime = { path = "../deps/lifetime" }

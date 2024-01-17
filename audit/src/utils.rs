@@ -1,4 +1,3 @@
-use std::collections::{HashMap, HashSet};
 use std::env::current_exe;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -7,12 +6,17 @@ use std::thread;
 
 use ansi_term::{Color, Style};
 use features::Rufs;
+use fxhash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use lazy_static::lazy_static;
+use lockfile::parse_from_path;
 use log::debug;
 use regex::Regex;
 use simplelog::{CombinedLogger, Config, LevelFilter, WriteLogger};
 
 use super::cargo;
+
+// Test usage, we shall remove it later.
+const RUSTC_VERSION: u32 = 65;
 
 lazy_static! {
     static ref RE_FEATURES: Regex = Regex::new(r"FDelimiter::\{(.*?)\}::FDelimiter").unwrap();
@@ -25,77 +29,25 @@ lazy_static! {
 /// Create a wrapper around cargo and rustc,
 /// this function shall be called only once, at first layer.
 pub fn cargo_wrapper() -> i32 {
-    let mut cmd = cargo();
-
-    cmd.arg("rustc");
-
-    let path = current_exe().expect("current executable path invalid");
-    cmd.env("RUSTC_WRAPPER", &path);
-
-    let mut child = cmd
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("could not run cargo");
-
-    // Listen to the cargo process
-    let stdout = BufReader::new(child.stdout.take().expect("Fatal, failed to get stdout"));
-    let stderr = BufReader::new(child.stderr.take().expect("Fatal, failed to get stderr"));
-
-    // Resolving stdout and stderr infos
-    let stdout_handle = thread::spawn(move || {
-        let mut used_features: HashMap<String, HashSet<String>> = HashMap::new();
-
-        for line in stdout.lines() {
-            debug!("Stdout: {line:?}");
-            let line = line.expect("Fatal, get stdout line fails");
-
-            if let Some(caps) = RE_FEATURES.captures(&line) {
-                let rufs = Rufs::from(caps.get(1).expect("Fatal, resolve ruf fails").as_str());
-                used_features
-                    .entry(rufs.crate_name)
-                    .or_insert_with(HashSet::new)
-                    .extend(rufs.rufs.into_iter().map(|ruf| {
-                        assert!(ruf.cond.is_none());
-                        ruf.feature
-                    }));
-            }
+    // We check ruf usage first
+    let used_rufs = match rustc_wrapper() {
+        Ok(used_rufs) => used_rufs,
+        Err(err) => {
+            error(&err);
+            return -1;
         }
+    };
 
-        return used_features;
-    });
-
-    let stderr_handle = thread::spawn(move || {
-        for line in stderr.lines() {
-            debug!("Stderr: {line:?}");
-            let line = line.expect("Fatal, get stdout line fails");
-
-            // compiling info, we can print it
-            if let Some(index) = line.find("Compiling") {
-                println!("\t{} {}", BOLD_GREEN.paint("Scanning"), &line[index..]);
-            }
-        }
-    });
-
-    // Waiting for process to ends
-    let rufs = stdout_handle.join().unwrap();
-    stderr_handle.join().unwrap();
-
-    let output = child
-        .wait_with_output()
-        .expect("Fatal, fails to get status of cargo");
-
-    if !output.status.success() {
-        error(&String::from_utf8_lossy(&output.stderr));
-    }
-
+    // We fetch the used features, and then we shall check it
     println!("{} ruf scan done", BOLD_GREEN.paint("Finishing"));
-    println!("{:?}", rufs);
 
-    return output.status.code().unwrap_or(0);
+    // Check rufs
+    check_rufs(used_rufs).unwrap();
+
+    return 0;
 }
 
-/// Do some init things.
+/// Do some init things, and return needed lib path.
 pub fn init() -> String {
     CombinedLogger::init(vec![
         // TermLogger::new(
@@ -111,7 +63,7 @@ pub fn init() -> String {
                 .write(true)
                 .append(true)
                 .create(true)
-                .open("/Users/wyffeiwhe/Desktop/Research/RustRUF/ruf-audit/debug.log")
+                .open("/home/ubuntu/Workspaces/ruf-audit/debug.log")
                 .unwrap(),
         ),
     ])
@@ -142,4 +94,97 @@ pub fn init() -> String {
 
 fn error(msg: &str) {
     println!("{} {}", BOLD_RED.paint("error"), msg);
+}
+
+/// This function wrap rustc with our audit tool, and fetch
+/// all rufs used in the crate.
+fn rustc_wrapper() -> Result<HashMap<String, HashSet<String>>, String> {
+    let mut cmd = cargo();
+    cmd.arg("rustc");
+
+    let path = current_exe().map_err(|_| format!("Fatal, cannot get current exe path"))?;
+    cmd.env("RUSTC_WRAPPER", &path);
+
+    let mut child = cmd
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|_| format!("Fatal, cannot spawn cargo process"))?;
+
+    // Listen to the cargo process
+    let stdout = BufReader::new(child.stdout.take().unwrap());
+    let stderr = BufReader::new(child.stderr.take().unwrap());
+
+    // Resolving stdout and stderr infos
+    let stdout_handle = thread::spawn(move || {
+        let mut used_features: HashMap<String, HashSet<String>> = HashMap::default();
+
+        for line in stdout.lines() {
+            debug!("Stdout: {line:?}");
+            let line = line.expect("Fatal, get stdout line fails");
+
+            if let Some(caps) = RE_FEATURES.captures(&line) {
+                let rufs = Rufs::from(caps.get(1).expect("Fatal, resolve ruf fails").as_str());
+                used_features
+                    .entry(rufs.crate_name)
+                    .or_insert_with(HashSet::default)
+                    .extend(rufs.rufs.into_iter().map(|ruf| {
+                        assert!(ruf.cond.is_none());
+                        ruf.feature
+                    }));
+            }
+        }
+
+        return used_features;
+    });
+
+    let stderr_handle = thread::spawn(move || {
+        for line in stderr.lines() {
+            debug!("Stderr: {line:?}");
+            let line = line.expect("Fatal, get stdout line fails");
+
+            // compiling info, we can print it
+            if let Some(index) = line.find("Compiling") {
+                println!("\t{} {}", BOLD_GREEN.paint("Scanning"), &line[index..]);
+            }
+        }
+    });
+
+    // Waiting for process to ends
+    let used_rufs = stdout_handle.join().map_err(|err| {
+        format!("Fatal, cannot extract rufs from stdout thread, maybe cargo process fails? Error info: {:?}", err)
+    })?;
+    stderr_handle.join().unwrap();
+
+    let output = child
+        .wait_with_output()
+        .map_err(|_| format!("Fatal, fails to wait cargo process"))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "Fatal, cargo process run fails, stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    return Ok(used_rufs);
+}
+
+fn check_rufs(used_rufs: HashMap<String, HashSet<String>>) -> Result<(), String> {
+    let lockfile = parse_from_path("Cargo.lock")
+        .map_err(|err| format!("Fatal, cannot parse Cargo.lock: {}", err))?;
+
+    let dep_tree = lockfile
+        .dependency_tree()
+        .map_err(|err| format!("Fatal, cannot get dependency tree from Cargo.lock: {}", err))?;
+
+
+    for pack in lockfile.packages {
+        let name = pack.name.as_str();
+        if let Some(ruf) = used_rufs.get(name) {
+            //TODO: check ruf
+        }
+    }
+
+    unimplemented!()
 }

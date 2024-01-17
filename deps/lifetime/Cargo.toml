@@ -1,5 +1,5 @@
 [package]
-name = "ruf_lifetime"
+name = "lifetime"
 version = "0.1.0"
 edition = "2021"
 
@@ -7,3 +7,4 @@ edition = "2021"
 
 [dependencies]
 fxhash = "0.2.1"
+lazy_static = "1.4.0"

@@ -14,6 +14,15 @@ pub struct Rufs {
     pub rufs: Vec<Ruf>,
 }
 
+#[derive(Debug)]
+pub enum RufStatus {
+    Unknown,
+    Active,
+    Incomplete,
+    Accepted,
+    Removed,
+}
+
 impl Ruf {
     pub fn new(cond: Option<String>, feature: String) -> Self {
         Ruf { cond, feature }
@@ -56,5 +65,18 @@ impl Into<String> for Rufs {
 impl From<&str> for Rufs {
     fn from(value: &str) -> Self {
         serde_json::from_str(&value).expect("Fatal, deserialize fails")
+    }
+}
+
+impl From<&str> for RufStatus {
+    fn from(value: &str) -> Self {
+        match value {
+            "active" => RufStatus::Active,
+            "incomplete" => RufStatus::Incomplete,
+            "accepted" => RufStatus::Accepted,
+            "removed" => RufStatus::Removed,
+            "" => RufStatus::Unknown,
+            _ => unreachable!("Fatal, unknown ruf status: {}", value),
+        }
     }
 }

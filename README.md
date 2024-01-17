@@ -1,9 +1,10 @@
 # ruf-audit
 Audit ruf usage in crates
 
-# Usage
+## Requirements
 Before buid, please add needed env:
 ```bash
+sudo apt install build-essential
 rustup toolchain install nightly-2023-12-12
 rustup component add rustc-dev llvm-tools
 ```
@@ -13,7 +14,10 @@ And then you can build with:
 cargo build
 ```
 
-And please use cli rather than `cargo run` to use this tools:
+We also need database here...(TODO)
+
+## Usages
+Please use cli rather than `cargo run` to use this tools:
 ```bash
 ruf_audit # Please run this cli in the root of crates
 ```
