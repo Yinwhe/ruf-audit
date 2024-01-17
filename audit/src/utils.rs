@@ -8,15 +8,15 @@ use ansi_term::{Color, Style};
 use features::Rufs;
 use fxhash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use lazy_static::lazy_static;
-use lockfile::parse_from_path;
 use log::debug;
+use petgraph::visit;
 use regex::Regex;
 use simplelog::{CombinedLogger, Config, LevelFilter, WriteLogger};
 
 use super::cargo;
 
 // Test usage, we shall remove it later.
-const RUSTC_VERSION: u32 = 65;
+const RUSTC_VERSION: u32 = 63;
 
 lazy_static! {
     static ref RE_FEATURES: Regex = Regex::new(r"FDelimiter::\{(.*?)\}::FDelimiter").unwrap();
@@ -33,17 +33,24 @@ pub fn cargo_wrapper() -> i32 {
     let used_rufs = match rustc_wrapper() {
         Ok(used_rufs) => used_rufs,
         Err(err) => {
-            error(&err);
+            error_print(&err);
             return -1;
         }
     };
 
     // We fetch the used features, and then we shall check it
-    println!("{} ruf scan done", BOLD_GREEN.paint("Finishing"));
+    info_print("Finishing", "fetching used rufs");
 
+    println!("[Debug] rufs: {:?}", used_rufs);
+
+    info_print("Starting", "analyzing used rufs");
     // Check rufs
-    check_rufs(used_rufs).unwrap();
+    if let Err(err) = check_rufs(used_rufs) {
+        error_print(&err);
+        return -1;
+    }
 
+    info_print("Finishing", "currently no rufs issue found");
     return 0;
 }
 
@@ -92,7 +99,11 @@ pub fn init() -> String {
     format!("{}:{}", lib_dir1, lib_dir2)
 }
 
-fn error(msg: &str) {
+fn info_print(title: &str, msg: &str) {
+    println!("{} {}", BOLD_GREEN.paint(title), msg);
+}
+
+fn error_print(msg: &str) {
     println!("{} {}", BOLD_RED.paint("error"), msg);
 }
 
@@ -115,6 +126,7 @@ fn rustc_wrapper() -> Result<HashMap<String, HashSet<String>>, String> {
     let stdout = BufReader::new(child.stdout.take().unwrap());
     let stderr = BufReader::new(child.stderr.take().unwrap());
 
+    info_print("Starting", "scan rufs");
     // Resolving stdout and stderr infos
     let stdout_handle = thread::spawn(move || {
         let mut used_features: HashMap<String, HashSet<String>> = HashMap::default();
@@ -145,7 +157,7 @@ fn rustc_wrapper() -> Result<HashMap<String, HashSet<String>>, String> {
 
             // compiling info, we can print it
             if let Some(index) = line.find("Compiling") {
-                println!("\t{} {}", BOLD_GREEN.paint("Scanning"), &line[index..]);
+                info_print("\tScanning", &line[index+9..]);
             }
         }
     });
@@ -171,20 +183,43 @@ fn rustc_wrapper() -> Result<HashMap<String, HashSet<String>>, String> {
 }
 
 fn check_rufs(used_rufs: HashMap<String, HashSet<String>>) -> Result<(), String> {
-    let lockfile = parse_from_path("Cargo.lock")
+    let lockfile = lockfile::parse_from_path("Cargo.lock")
         .map_err(|err| format!("Fatal, cannot parse Cargo.lock: {}", err))?;
 
     let dep_tree = lockfile
         .dependency_tree()
         .map_err(|err| format!("Fatal, cannot get dependency tree from Cargo.lock: {}", err))?;
 
-
-    for pack in lockfile.packages {
-        let name = pack.name.as_str();
-        if let Some(ruf) = used_rufs.get(name) {
-            //TODO: check ruf
+    // Check ruf usage in BFS mode.
+    assert!(dep_tree.roots().len() == 1); // When will this not be 1 ?
+    let graph = dep_tree.graph();
+    let mut issued_dep = None;
+    for root in dep_tree.roots() {
+        let mut bfs = visit::Bfs::new(&graph, root);
+        while let Some(nx) = bfs.next(&graph) {
+            let node = &graph[nx];
+            if let Some(rufs) = used_rufs.get(node.name.as_str()) {
+                if rufs
+                    .iter()
+                    .filter(|ruf| !lifetime::get_ruf_status(ruf, RUSTC_VERSION).is_usable())
+                    .count()
+                    > 0
+                {
+                    issued_dep = Some(node.to_owned());
+                    break;
+                }
+            }
         }
     }
+
+    if issued_dep.is_none() {
+        // no rufs issue found (but other problem may exists)
+        return Ok(());
+    }
+
+    // We found a ruf issue
+    let issued_dep = issued_dep.unwrap();
+    // TODO: how to fix?
 
     unimplemented!()
 }

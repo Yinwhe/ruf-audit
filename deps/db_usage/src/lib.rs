@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Mutex};
 
-use features::{Ruf, RufStatus};
+use features::Ruf;
 use lazy_static::lazy_static;
 use postgres::{Client, NoTls};
 
@@ -68,28 +68,28 @@ pub fn get_rufs_with_crate_id(crate_id: i32) -> Result<HashMap<String, Vec<Ruf>>
     Ok(dep_rufs)
 }
 
-#[allow(unused)]
-pub fn get_ruf_status(ruf_name: &str, rustc_ver: u32) -> Result<RufStatus, String> {
-    let status = CONN
-        .lock()
-        .unwrap()
-        .query(
-            &format!(
-                "SELECT v1_{}_0 FROM feature_timeline WHERE name = '{}'",
-                rustc_ver, ruf_name
-            ),
-            &[],
-        )
-        .map_err(|e| e.to_string())?;
+// #[allow(unused)]
+// pub fn get_ruf_status(ruf_name: &str, rustc_ver: u32) -> Result<RufStatus, String> {
+//     let status = CONN
+//         .lock()
+//         .unwrap()
+//         .query(
+//             &format!(
+//                 "SELECT v1_{}_0 FROM feature_timeline WHERE name = '{}'",
+//                 rustc_ver, ruf_name
+//             ),
+//             &[],
+//         )
+//         .map_err(|e| e.to_string())?;
 
-    assert!(status.len() <= 1);
-    if status.len() == 0 {
-        return Ok(RufStatus::Unknown);
-    } else {
-        let status: String = status[0].get(0);
-        return Ok(RufStatus::from(status.as_str()));
-    }
-}
+//     assert!(status.len() <= 1);
+//     if status.len() == 0 {
+//         return Ok(RufStatus::Unknown);
+//     } else {
+//         let status: String = status[0].get(0);
+//         return Ok(RufStatus::from(status.as_str()));
+//     }
+// }
 
 // #[test]
 // fn test() {

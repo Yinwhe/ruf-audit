@@ -8,7 +8,7 @@ use utils::{cargo_wrapper, init};
 
 fn main() {
     let ld_library_path = init();
-
+    // TODO: use config types.
     info!(
         "startup command line: {:?}",
         args().collect::<Vec<String>>()
