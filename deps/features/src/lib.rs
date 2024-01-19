@@ -9,7 +9,7 @@ pub struct Ruf {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Rufs {
+pub struct CrateRufs {
     pub crate_name: String,
     pub rufs: Vec<Ruf>,
 }

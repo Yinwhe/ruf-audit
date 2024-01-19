@@ -1,20 +1,23 @@
 use std::env::{args, current_exe};
+use std::fs::File;
 use std::process::{exit, Command};
 
 use log::{debug, info, warn};
+use simplelog::{CombinedLogger, Config, LevelFilter, WriteLogger};
 
 mod utils;
-use utils::{cargo_wrapper, init};
+use utils::cargo_wrapper;
+
+mod config;
+use config::AuditConfig;
 
 fn main() {
-    let ld_library_path = init();
-    // TODO: use config types.
+    let config = init();
+
     info!(
         "startup command line: {:?}",
         args().collect::<Vec<String>>()
     );
-
-    debug!("Library Path: {:?}", ld_library_path);
 
     // TODO: Make args parse better
     let args = args().collect::<Vec<String>>();
@@ -36,7 +39,7 @@ fn main() {
             debug!("Use audit, pass by pipe");
             scan()
                 .args(&args[2..])
-                .env("LD_LIBRARY_PATH", ld_library_path)
+                .env("LD_LIBRARY_PATH", config.get_rustlib_path())
                 .spawn()
                 .expect("Fatal, cannot run scanner")
                 .wait_with_output()
@@ -48,9 +51,27 @@ fn main() {
     } else {
         warn!("Exec cargo_wrapper, this function shall be exec only once globally!");
 
-        let exit_code = cargo_wrapper();
+        let exit_code = cargo_wrapper(config);
         exit(exit_code);
     }
+}
+
+/// Do some init things, and return needed lib path.
+fn init() -> AuditConfig {
+    CombinedLogger::init(vec![WriteLogger::new(
+        LevelFilter::Debug,
+        Config::default(),
+        File::options()
+            .write(true)
+            .append(true)
+            .create(true)
+            .open("/home/ubuntu/Workspaces/ruf-audit/debug.log")
+            .unwrap(),
+    )])
+    .unwrap();
+
+    // TODO: fix expect
+    AuditConfig::default().expect("TEMP")
 }
 
 fn scan() -> Command {

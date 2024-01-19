@@ -3,6 +3,7 @@ use std::{collections::HashMap, sync::Mutex};
 use features::Ruf;
 use lazy_static::lazy_static;
 use postgres::{Client, NoTls};
+use semver::Version;
 
 /*
 CREATE VIEW version_ruf AS
@@ -42,7 +43,7 @@ pub fn get_crate_id_with_name(crate_name: &str) -> Result<i32, String> {
 }
 
 #[allow(unused)]
-pub fn get_rufs_with_crate_id(crate_id: i32) -> Result<HashMap<String, Vec<Ruf>>, String> {
+pub fn get_rufs_with_crate_id(crate_id: i32) -> Result<HashMap<Version, Vec<Ruf>>, String> {
     let rows = CONN
         .lock()
         .unwrap()
@@ -54,45 +55,30 @@ pub fn get_rufs_with_crate_id(crate_id: i32) -> Result<HashMap<String, Vec<Ruf>>
 
     let mut dep_rufs = HashMap::new();
     for row in rows {
-        let semver: String = row.get(1);
-        if let Ok(ruf) = row.try_get::<usize, String>(4) {
-            let cond = row
-                .try_get::<usize, String>(3)
-                .map_or(None, |cond| Some(cond));
-            let ruf = Ruf::new(cond, ruf);
+        let ver: String = row.get(1);
+        if let Ok(ver) = Version::parse(&ver) {
+            if let Ok(ruf) = row.try_get::<usize, String>(4) {
+                let cond = row.try_get::<usize, String>(3).map_err(|e| e.to_string())?;
+                let cond = if cond.is_empty() { None } else { Some(cond) };
 
-            dep_rufs.entry(semver).or_insert_with(Vec::new).push(ruf);
+                let ruf = Ruf::new(cond, ruf);
+
+                dep_rufs.entry(ver).or_insert_with(Vec::new).push(ruf);
+            }
         }
     }
 
     Ok(dep_rufs)
 }
 
-// #[allow(unused)]
-// pub fn get_ruf_status(ruf_name: &str, rustc_ver: u32) -> Result<RufStatus, String> {
-//     let status = CONN
-//         .lock()
-//         .unwrap()
-//         .query(
-//             &format!(
-//                 "SELECT v1_{}_0 FROM feature_timeline WHERE name = '{}'",
-//                 rustc_ver, ruf_name
-//             ),
-//             &[],
-//         )
-//         .map_err(|e| e.to_string())?;
+#[allow(unused)]
+pub fn get_rufs_with_crate_name(crate_name: &str) -> Result<HashMap<Version, Vec<Ruf>>, String> {
+    let crate_id = get_crate_id_with_name(crate_name)?;
+    get_rufs_with_crate_id(crate_id)
+}
 
-//     assert!(status.len() <= 1);
-//     if status.len() == 0 {
-//         return Ok(RufStatus::Unknown);
-//     } else {
-//         let status: String = status[0].get(0);
-//         return Ok(RufStatus::from(status.as_str()));
-//     }
-// }
-
-// #[test]
-// fn test() {
-//     let res = get_ruf_status("123", 10);
-//     print!("{res:#?}");
-// }
+#[test]
+fn test() {
+    let res = get_rufs_with_crate_name("semver");
+    println!("{res:#?}")
+}

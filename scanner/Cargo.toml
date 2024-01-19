@@ -7,3 +7,4 @@ edition = "2021"
 
 [dependencies]
 features = { path = "../deps/features"} 
+thin-vec = "0.2.13"

@@ -8,4 +8,5 @@ edition = "2021"
 [dependencies]
 postgres = "0.19.7"
 lazy_static = "1.4.0"
+semver = "1.0.21"
 features = { path = "../features" }

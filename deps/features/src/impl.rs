@@ -8,9 +8,9 @@ impl Ruf {
     }
 }
 
-impl Rufs {
+impl CrateRufs {
     pub fn new(crate_name: String, rufs: Vec<Ruf>) -> Self {
-        Rufs { crate_name, rufs }
+        CrateRufs { crate_name, rufs }
     }
 
     pub fn from_vec(crate_name: String, no_cond_rufs: Vec<String>) -> Self {
@@ -18,7 +18,7 @@ impl Rufs {
         for ruf in no_cond_rufs {
             rufs_vec.push(Ruf::new(None, ruf));
         }
-        Rufs {
+        CrateRufs {
             crate_name,
             rufs: rufs_vec,
         }
@@ -35,7 +35,7 @@ impl RufStatus {
 }
 
 
-impl Display for Rufs {
+impl Display for CrateRufs {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -45,13 +45,13 @@ impl Display for Rufs {
     }
 }
 
-impl Into<String> for Rufs {
+impl Into<String> for CrateRufs {
     fn into(self) -> String {
         format!("{self}")
     }
 }
 
-impl From<&str> for Rufs {
+impl From<&str> for CrateRufs {
     fn from(value: &str) -> Self {
         serde_json::from_str(&value).expect("Fatal, deserialize fails")
     }

@@ -1,22 +1,20 @@
 use std::env::current_exe;
 use std::fs::File;
-use std::io::{BufRead, BufReader};
-use std::process::{Command, Stdio};
+use std::io::{BufRead, BufReader, Write};
+use std::process::Stdio;
 use std::thread;
 
 use ansi_term::{Color, Style};
-use features::Rufs;
+use features::{CrateRufs, Ruf};
 use fxhash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use lazy_static::lazy_static;
 use log::debug;
 use petgraph::visit;
 use regex::Regex;
-use simplelog::{CombinedLogger, Config, LevelFilter, WriteLogger};
 
-use super::cargo;
+use crate::config::AuditConfig;
 
-// Test usage, we shall remove it later.
-const RUSTC_VERSION: u32 = 63;
+use super::{cargo, scan};
 
 lazy_static! {
     static ref RE_FEATURES: Regex = Regex::new(r"FDelimiter::\{(.*?)\}::FDelimiter").unwrap();
@@ -28,7 +26,7 @@ lazy_static! {
 
 /// Create a wrapper around cargo and rustc,
 /// this function shall be called only once, at first layer.
-pub fn cargo_wrapper() -> i32 {
+pub fn cargo_wrapper(config: AuditConfig) -> i32 {
     // We check ruf usage first
     let used_rufs = match rustc_wrapper() {
         Ok(used_rufs) => used_rufs,
@@ -45,58 +43,13 @@ pub fn cargo_wrapper() -> i32 {
 
     info_print("Starting", "analyzing used rufs");
     // Check rufs
-    if let Err(err) = check_rufs(used_rufs) {
+    if let Err(err) = check_rufs(&config, used_rufs) {
         error_print(&err);
         return -1;
     }
 
     info_print("Finishing", "currently no rufs issue found");
     return 0;
-}
-
-/// Do some init things, and return needed lib path.
-pub fn init() -> String {
-    CombinedLogger::init(vec![
-        // TermLogger::new(
-        //     LevelFilter::Info,
-        //     Config::default(),
-        //     TerminalMode::Mixed,
-        //     ColorChoice::Auto,
-        // ),
-        WriteLogger::new(
-            LevelFilter::Debug,
-            Config::default(),
-            File::options()
-                .write(true)
-                .append(true)
-                .create(true)
-                .open("/home/ubuntu/Workspaces/ruf-audit/debug.log")
-                .unwrap(),
-        ),
-    ])
-    .unwrap();
-
-    // Get some library path
-    let mut rustup_home = Command::new("rustup");
-    rustup_home.args(["show", "home"]);
-    let output = rustup_home
-        .output()
-        .expect("Fatal, cannot fetch rustup home");
-
-    let rustup_home = if output.status.success() {
-        String::from_utf8_lossy(&output.stdout)
-    } else {
-        panic!("Fatal, cannot fetch rustup home")
-    };
-
-    let rustup_dir = format!(
-        "{}/toolchains/nightly-2023-12-12-x86_64-unknown-linux-gnu",
-        rustup_home.trim()
-    );
-    let lib_dir1 = format!("{rustup_dir}/lib/rustlib/x86_64-unknown-linux-gnu/lib");
-    let lib_dir2 = format!("{rustup_dir}/lib");
-
-    format!("{}:{}", lib_dir1, lib_dir2)
 }
 
 fn info_print(title: &str, msg: &str) {
@@ -136,7 +89,7 @@ fn rustc_wrapper() -> Result<HashMap<String, HashSet<String>>, String> {
             let line = line.expect("Fatal, get stdout line fails");
 
             if let Some(caps) = RE_FEATURES.captures(&line) {
-                let rufs = Rufs::from(caps.get(1).expect("Fatal, resolve ruf fails").as_str());
+                let rufs = CrateRufs::from(caps.get(1).expect("Fatal, resolve ruf fails").as_str());
                 used_features
                     .entry(rufs.crate_name)
                     .or_insert_with(HashSet::default)
@@ -157,7 +110,7 @@ fn rustc_wrapper() -> Result<HashMap<String, HashSet<String>>, String> {
 
             // compiling info, we can print it
             if let Some(index) = line.find("Compiling") {
-                info_print("\tScanning", &line[index+9..]);
+                info_print("\tScanning", &line[index + 9..]);
             }
         }
     });
@@ -182,7 +135,10 @@ fn rustc_wrapper() -> Result<HashMap<String, HashSet<String>>, String> {
     return Ok(used_rufs);
 }
 
-fn check_rufs(used_rufs: HashMap<String, HashSet<String>>) -> Result<(), String> {
+fn check_rufs(
+    config: &AuditConfig,
+    used_rufs: HashMap<String, HashSet<String>>,
+) -> Result<(), String> {
     let lockfile = lockfile::parse_from_path("Cargo.lock")
         .map_err(|err| format!("Fatal, cannot parse Cargo.lock: {}", err))?;
 
@@ -201,7 +157,9 @@ fn check_rufs(used_rufs: HashMap<String, HashSet<String>>) -> Result<(), String>
             if let Some(rufs) = used_rufs.get(node.name.as_str()) {
                 if rufs
                     .iter()
-                    .filter(|ruf| !lifetime::get_ruf_status(ruf, RUSTC_VERSION).is_usable())
+                    .filter(|ruf| {
+                        !lifetime::get_ruf_status(ruf, config.get_rust_version()).is_usable()
+                    })
                     .count()
                     > 0
                 {
@@ -219,7 +177,110 @@ fn check_rufs(used_rufs: HashMap<String, HashSet<String>>) -> Result<(), String>
 
     // We found a ruf issue
     let issued_dep = issued_dep.unwrap();
-    // TODO: how to fix?
+    info_print("\tFixing", &format!("dep '{}' cause ruf issues", issued_dep.name));
+
+    let candidate_vers = db_usage::get_rufs_with_crate_name(issued_dep.name.as_str())?;
+    // println!("[Debug] candidates: {:?}", candidate_vers);
+    let current_ver = issued_dep.version;
+    let mut usable_vers = vec![];
+
+    info_print("\tFixing", &format!("filter usable version from {} versions", candidate_vers.len()));
+
+    for cad in &candidate_vers {
+        if cad.0 == &current_ver {
+            continue;
+        }
+
+        let is_usable = match check_candidate(config, &cad.1) {
+            Ok(is_usable) => is_usable,
+            Err(err) => {
+                error_print(&err);
+                continue;
+            }
+        };
+
+        if is_usable {
+            usable_vers.push(cad.0);
+        }
+    }
+
+    info_print(
+        "\tFixing",
+        &format!(
+            "found {} usable version: {:?}",
+            usable_vers.len(),
+            usable_vers
+        ),
+    );
+
+    if usable_vers.is_empty() {
+        return Err(format!(
+            "Fatal, cannot find usable version for crate '{}'",
+            issued_dep.name
+        ));
+    }
+
+    
 
     unimplemented!()
+}
+
+/// Check whether the candidate version is usable.
+fn check_candidate(config: &AuditConfig, rufs: &Vec<Ruf>) -> Result<bool, String> {
+    let tmp_rsfile_path = config.get_tmp_rsfile();
+    let mut content = String::new();
+    let mut used_rufs = vec![];
+    let livetime_tmp;
+
+    for ruf in rufs {
+        if let Some(cond) = &ruf.cond {
+            content.push_str(&format!(
+                "#[cfg_attr({}, feature({}))]\n",
+                cond, ruf.feature
+            ))
+        } else {
+            used_rufs.push(ruf.feature.as_str());
+        }
+    }
+
+    // We determine the rufs used first
+    if !content.is_empty() {
+        let mut f = File::open(tmp_rsfile_path).expect("Fatal, cannot open tmp file");
+        f.write_all(content.as_bytes())
+            .expect("Fatal, cannot write tmp file");
+
+        let output = scan()
+            .args(["--crate-name", "TODO", tmp_rsfile_path])
+            .env("LD_LIBRARY_PATH", config.get_rustlib_path())
+            .output()
+            .expect("Fatal, cannot fetch scanner output");
+
+        if !output.status.success() {
+            return Err(format!(
+                "Fatal, cannot check candidate rufs: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        if let Some(caps) = RE_FEATURES.captures(&stdout) {
+            livetime_tmp =
+                CrateRufs::from(caps.get(1).expect("Fatal, resolve ruf fails").as_str()).rufs;
+            for ruf in &livetime_tmp {
+                assert!(ruf.cond.is_none());
+                used_rufs.push(ruf.feature.as_str());
+            }
+        }
+    }
+
+    if used_rufs
+        .iter()
+        .filter(|ruf| !lifetime::get_ruf_status(ruf, config.get_rust_version()).is_usable())
+        .count()
+        > 0
+    {
+        return Ok(false);
+    } else {
+        return Ok(true);
+    }
 }

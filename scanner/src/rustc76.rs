@@ -4,15 +4,21 @@ use std::io::{self, Read};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use features::Rufs;
+use features::CrateRufs;
+
 use rustc_driver::{
     args, catch_with_exit_code, diagnostics_registry, handle_options, Callbacks, Compilation,
     TimePassesCallbacks, DEFAULT_LOCALE_RESOURCES,
 };
+
+use rustc_ast::{self as ast, Attribute};
 use rustc_errors::ErrorGuaranteed;
+use rustc_feature::Features;
 use rustc_interface::interface;
 use rustc_session::config::{self, ErrorOutputType, Input};
+use rustc_session::output::find_crate_name;
 use rustc_session::EarlyErrorHandler;
+use rustc_span::symbol::sym;
 use rustc_span::FileName;
 
 pub fn run_rustc() -> i32 {
@@ -34,6 +40,7 @@ pub fn run_rustc() -> i32 {
     exit_code
 }
 
+// TODO: Is it correct?
 fn run_compiler(
     at_args: &[String],
     callbacks: &mut (dyn Callbacks + Send),
@@ -114,27 +121,38 @@ fn run_compiler(
                 return early_exit();
             }
 
-            queries.global_ctxt()?;
+            let sess = &compiler.sess;
 
-            if callbacks.after_expansion(compiler, queries) == Compilation::Stop {
-                return early_exit();
-            }
+            let krate = queries.parse()?.steal();
 
-            let f = queries
-                .global_ctxt()?
-                .enter(|tcx| tcx.features().declared_features.clone());
+            let pre_configured_attrs =
+                rustc_expand::config::pre_configure_attrs(sess, &krate.attrs);
+
+            // parse `#[crate_name]` even if `--crate-name` was passed, to make sure it matches.
+            let crate_name = find_crate_name(sess, &pre_configured_attrs);
+
+            let f = features(&pre_configured_attrs).declared_features;
+
+            // queries.global_ctxt()?;
+
+            // if callbacks.after_expansion(compiler, queries) == Compilation::Stop {
+            //     return early_exit();
+            // }
+
+            // let f = queries
+            //     .global_ctxt()?
+            //     .enter(|tcx| tcx.features().declared_features.clone());
 
             Ok(Some(f))
         })?;
 
         if let Some(mut features) = features {
-            // TODO
             let features: Vec<String> = features.drain().map(|sym| sym.to_string()).collect();
             let crate_name = crate_name.first().unwrap().clone();
 
             // Print the featuers
             if !features.is_empty() {
-                println!("{}", Rufs::from_vec(crate_name, features));
+                println!("{}", CrateRufs::from_vec(crate_name, features));
             }
         }
 
@@ -184,4 +202,35 @@ fn make_input(
     } else {
         Ok(None)
     }
+}
+
+/// Procecss features used.
+/// Copy and modify from rustc_expand crates.
+pub fn features(krate_attrs: &[Attribute]) -> Features {
+    fn feature_list(attr: &Attribute) -> Vec<ast::NestedMetaItem> {
+        if attr.has_name(sym::feature)
+            && let Some(list) = attr.meta_item_list()
+        {
+            list.to_vec()
+        } else {
+            Vec::new()
+        }
+    }
+
+    let mut features = Features::default();
+
+    // Process all features declared in the code.
+    for attr in krate_attrs {
+        for mi in feature_list(attr) {
+            let name = match mi.ident() {
+                Some(ident) if mi.is_word() => ident.name,
+                _ => continue,
+            };
+
+            // We simply record all features.
+            features.set_declared_lib_feature(name, mi.span());
+        }
+    }
+
+    features
 }

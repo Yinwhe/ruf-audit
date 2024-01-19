@@ -13,7 +13,7 @@ use rustc_session::{
     config, config::ErrorOutputType, config::Input, early_error, early_error_no_abort,
 };
 use rustc_span::FileName;
-// use rustc_ast::CRATE_NODE_ID;
+use rustc_ast::CRATE_NODE_ID;
 
 pub fn run_rustc() -> i32 {
     let mut callbacks = TimePassesCallbacks::default();
@@ -103,27 +103,14 @@ fn run_compiler(
 
             queries.parse()?;
 
+            let krate = queries.parse().unwrap().steal();
+            let (krate, features) = rustc_expand::config::features(sess, krate, CRATE_NODE_ID);
+
             if callbacks.after_parsing(compiler, queries) == Compilation::Stop {
                 return early_exit();
             }
 
-            println!("Debug 1");
-
-            queries.register_plugins()?;
-
-            queries.global_ctxt()?;
-
-            println!("Debug 2");
-
-            if callbacks.after_expansion(compiler, queries) == Compilation::Stop {
-                return early_exit();
-            }
-
-            queries.global_ctxt()?.enter(|tcx| {
-                let features = tcx.features();
-                println!("{:?}", features);
-            });
-
+            print!("{:?}", features);
 
             Ok(())
         })?;
@@ -176,54 +163,3 @@ fn make_input(
         Ok(None)
     }
 }
-
-// /// Process command line options.
-// /// Copy and modify from rustc_driver_impl crates.
-// fn handle_options(args: &[String]) -> Option<getopts::Matches> {
-//     // Throw away the first argument, the name of the binary
-//     let args = &args[1..];
-
-//     if args.is_empty() {
-//         // No args input.
-//         return None;
-//     }
-
-//     const NEEDED_OPTION: [&str; 10] = [
-//         "cfg",
-//         "check-cfg",
-//         "L",
-//         "crate-type",
-//         "edition",
-//         "target",
-//         "version",
-//         "extern",
-//         "sysroot",
-//         "help",
-//     ];
-
-//     let mut options = getopts::Options::new();
-//     for option in config::rustc_optgroups() {
-//         // We only parse some options.
-//         if NEEDED_OPTION.contains(&option.name) {
-//             // println!("name: {:?}, status: {:?}", option.name, option.stability);
-//             (option.apply)(&mut options);
-//         }
-//     }
-
-//     let matches = options.parse(args).unwrap_or_else(|e| {
-//         early_error(ErrorOutputType::default(), &e.to_string());
-//     });
-
-//     // TODO: write help docs
-//     if matches.opt_present("h") || matches.opt_present("help") {
-//         println!("help tbc...");
-//         return None;
-//     }
-
-//     if matches.opt_present("version") {
-//         println!("ruf-audit 0.1.0");
-//         return None;
-//     }
-
-//     Some(matches)
-// }
