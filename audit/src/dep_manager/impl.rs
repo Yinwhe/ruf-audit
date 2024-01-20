@@ -1,6 +1,6 @@
 use basic_usages::external::fxhash::FxHashMap as HashMap;
 use basic_usages::external::semver::Version;
-use basic_usages::ruf_build_info::{CondRuf, UsedRufs};
+use basic_usages::ruf_check_info::CondRufs;
 
 use cargo_lock::dependency::graph::{EdgeDirection, Graph, NodeIndex};
 use cargo_lock::Lockfile;
@@ -73,10 +73,7 @@ impl DepManager {
         })
     }
 
-    pub fn get_candidates(
-        &self,
-        pkgnx: NodeIndex,
-    ) -> Result<HashMap<Version, Vec<CondRuf>>, String> {
+    pub fn get_candidates(&self, pkgnx: NodeIndex) -> Result<HashMap<Version, CondRufs>, String> {
         let pkg = &self.graph()[pkgnx];
         let candidates = basic_usages::ruf_db_usage::get_rufs_with_crate_name(pkg.name.as_str())?;
 
@@ -108,23 +105,6 @@ impl DepManager {
             .collect();
 
         Ok(candidates)
-    }
-
-    pub fn rufs_usable(rufs: &UsedRufs, rustc_version: u32) -> bool {
-        assert!(rustc_version < basic_usages::ruf_lifetime::RUSTC_VER_NUM as u32);
-        if rufs
-            .0
-            .iter()
-            .filter(|ruf| {
-                !basic_usages::ruf_lifetime::get_ruf_status(ruf, rustc_version).is_usable()
-            })
-            .count()
-            > 0
-        {
-            return false;
-        }
-
-        return true;
     }
 
     pub fn root(&self) -> NodeIndex {

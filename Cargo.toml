@@ -2,7 +2,7 @@
 members = [
     "scanner",
     "audit",
-    "deps/dep_manager", "deps/basic_usages",
+    "deps/basic_usages",
 ]
 exclude = [
     "test",

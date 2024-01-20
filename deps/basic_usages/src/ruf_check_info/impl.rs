@@ -2,15 +2,66 @@ use std::fmt::Display;
 
 use super::*;
 
-impl CondRuf {
-    pub fn new(cond: Option<String>, feature: String) -> Self {
-        CondRuf { cond, feature }
-    }
-}
-
 impl UsedRufs {
     pub fn new(rufs: Vec<String>) -> Self {
         UsedRufs(rufs)
+    }
+
+    pub fn empty() -> Self {
+        UsedRufs(Vec::new())
+    }
+
+    pub fn push(&mut self, ruf: String) {
+        self.0.push(ruf);
+    }
+
+    pub fn extend(&mut self, rufs: impl IntoIterator<Item = String>) {
+        self.0.extend(rufs.into_iter());
+    }
+
+    pub fn iter(&self) -> std::slice::Iter<'_, String> {
+        self.0.iter()
+    }
+}
+
+impl CondRufs {
+    pub fn new(rufs: Vec<CondRuf>) -> Self {
+        CondRufs(rufs)
+    }
+
+    pub fn empty() -> Self {
+        CondRufs(Vec::new())
+    }
+
+    pub fn push(&mut self, ruf: CondRuf) {
+        self.0.push(ruf);
+    }
+
+    pub fn extend(&mut self, rufs: impl IntoIterator<Item = CondRuf>) {
+        self.0.extend(rufs.into_iter());
+    }
+
+    pub fn iter(&self) -> std::slice::Iter<'_, CondRuf> {
+        self.0.iter()
+    }
+}
+
+
+impl IntoIterator for UsedRufs {
+    type Item = String;
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+impl IntoIterator for CondRufs {
+    type Item = CondRuf;
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
     }
 }
 
@@ -23,23 +74,23 @@ impl RufStatus {
     }
 }
 
-impl Display for BuildInfo {
+impl Display for CheckInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "\nBDelimiter::{{{}}}::BDelimiter\n",
+            "\nCDelimiter::{{{}}}::CDelimiter\n",
             serde_json::to_string(&self).expect("Fatal, serialize fails")
         )
     }
 }
 
-impl Into<String> for BuildInfo {
+impl Into<String> for CheckInfo {
     fn into(self) -> String {
         format!("{self}")
     }
 }
 
-impl From<&str> for BuildInfo {
+impl From<&str> for CheckInfo {
     fn from(value: &str) -> Self {
         serde_json::from_str(&value).expect("Fatal, deserialize fails")
     }

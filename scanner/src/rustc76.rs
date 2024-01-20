@@ -4,7 +4,7 @@ use std::io::{self, Read};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use basic_usages::ruf_build_info::{BuildInfo, UsedRufs};
+use basic_usages::ruf_check_info::{CheckInfo, UsedRufs};
 use getopts::Options;
 use rustc_driver::{
     args, catch_with_exit_code, diagnostics_registry, handle_options, Callbacks, Compilation,
@@ -40,10 +40,14 @@ pub fn run_rustc() -> i32 {
 
         let mut opts = Options::new();
         opts.optflag("h", "help", "Print help information");
-        opts.optflag("b", "buildinfo", "Print build information, or only print used rufs");
-        let matches = opts.parse(&my_args[1..]).map_err(|e| {
-            handler.early_error(format!("failed to parse cli args: {}", e))
-        })?;
+        opts.optflag(
+            "c",
+            "checkinfo",
+            "Print full check information, or only print used rufs",
+        );
+        let matches = opts
+            .parse(&my_args[1..])
+            .map_err(|e| handler.early_error(format!("failed to parse cli args: {}", e)))?;
 
         // println!("args: {args:?}");
         // println!("my_args: {my_args:?}");
@@ -54,7 +58,7 @@ pub fn run_rustc() -> i32 {
             unimplemented!()
         }
 
-        if matches.opt_present("b") {
+        if matches.opt_present("c") {
             run_compiler(true, &rustc_args, &mut callbacks)
         } else {
             run_compiler(false, &rustc_args, &mut callbacks)
@@ -84,7 +88,6 @@ fn run_compiler(
     let sopts = config::build_session_options(&mut default_handler, &matches);
 
     let crate_name: Vec<String> = matches.opt_strs("crate-name");
-    
 
     let mut config = interface::Config {
         opts: sopts,
@@ -177,7 +180,7 @@ fn run_compiler(
 
         if output_buildinfo {
             assert!(crate_name.len() == 1, "Fatal, fetch crate name errors");
-            let build_info = BuildInfo{
+            let build_info = CheckInfo {
                 crate_name: crate_name.first().unwrap().clone(),
                 used_rufs: UsedRufs::new(used_rufs),
                 cfg: matches.opt_strs("cfg"),

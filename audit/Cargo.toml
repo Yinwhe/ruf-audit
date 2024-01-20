@@ -6,11 +6,15 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+cargo-lock = { version = "9.0.0", features = ["dependency-tree"] }
+tame-index = { version = "0.9.1", features = ["sparse"] }
+
 log = "0.4.20"
 simplelog = "0.12.1"
 regex = "1.10.2"
 lazy_static = "1.4.0"
 ansi_term = "0.12.1"
+cargo_metadata = "0.18.1"
+petgraph = "0.6.4"
 
 basic_usages = { path = "../deps/basic_usages" }
-dep_manager = { path = "../deps/dep_manager" }

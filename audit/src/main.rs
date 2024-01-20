@@ -1,4 +1,4 @@
-use std::env::{args, current_exe};
+use std::env::args;
 use std::fs::File;
 use std::process::{exit, Command};
 
@@ -8,8 +8,10 @@ use simplelog::{CombinedLogger, Config, LevelFilter, WriteLogger};
 mod utils;
 use utils::cargo_wrapper;
 
-mod config;
-use config::AuditConfig;
+mod build_config;
+use build_config::BuildConfig;
+
+mod dep_manager;
 
 fn main() {
     let config = init();
@@ -38,9 +40,9 @@ fn main() {
             // And here we do the scan operation
             debug!("Use audit, pass by pipe");
             // We need to collect build configs.
-            args[0] = "--buildinfo".to_string();
+            args[0] = "--checkinfo".to_string();
             args[1] = "--".to_string();
-            scan()
+            scanner()
                 .args(&args)
                 .env("LD_LIBRARY_PATH", config.get_rustlib_path())
                 .spawn()
@@ -60,9 +62,9 @@ fn main() {
 }
 
 /// Do some init things, and return needed lib path.
-fn init() -> AuditConfig {
+fn init() -> BuildConfig {
     CombinedLogger::init(vec![WriteLogger::new(
-        LevelFilter::Info,
+        LevelFilter::Debug,
         Config::default(),
         File::options()
             .write(true)
@@ -74,15 +76,19 @@ fn init() -> AuditConfig {
     .unwrap();
 
     // TODO: fix expect
-    AuditConfig::default().expect("TEMP")
+    BuildConfig::default().expect("TEMP")
 }
 
-fn scan() -> Command {
-    let mut path = current_exe().expect("current executable path invalid");
-    path.set_file_name("ruf_scanner");
-    Command::new(path)
+fn scanner() -> Command {
+    let mut cmd = Command::new("ruf_scanner");
+    cmd.env("RUSTUP_TOOLCHAIN", "nightly-2023-12-12");
+
+    cmd
 }
 
 fn cargo() -> Command {
-    Command::new("cargo")
+    let mut cmd = Command::new("cargo");
+    cmd.env("RUSTUP_TOOLCHAIN", "nightly-2023-12-12");
+
+    cmd
 }

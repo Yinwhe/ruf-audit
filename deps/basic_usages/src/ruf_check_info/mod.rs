@@ -8,8 +8,8 @@ pub struct CondRuf {
     pub feature: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct UsedRufs(pub Vec<String>);
+#[derive(Debug)]
+pub struct CondRufs(Vec<CondRuf>);
 
 #[derive(Debug)]
 pub enum RufStatus {
@@ -21,7 +21,10 @@ pub enum RufStatus {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct BuildInfo{
+pub struct UsedRufs(Vec<String>);
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CheckInfo{
     pub crate_name: String,
     pub used_rufs: UsedRufs,
     pub cfg: Vec<String>,

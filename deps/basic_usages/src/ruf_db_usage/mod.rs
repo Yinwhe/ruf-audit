@@ -5,7 +5,9 @@ use lazy_static::lazy_static;
 use postgres::{Client, NoTls};
 use semver::Version;
 
-use super::ruf_build_info::CondRuf;
+use crate::ruf_check_info::CondRufs;
+
+use super::ruf_check_info::CondRuf;
 
 /*
 CREATE VIEW version_ruf AS
@@ -45,7 +47,7 @@ pub fn get_crate_id_with_name(crate_name: &str) -> Result<i32, String> {
 }
 
 #[allow(unused)]
-pub fn get_rufs_with_crate_id(crate_id: i32) -> Result<HashMap<Version, Vec<CondRuf>>, String> {
+pub fn get_rufs_with_crate_id(crate_id: i32) -> Result<HashMap<Version, CondRufs>, String> {
     let rows = CONN
         .lock()
         .unwrap()
@@ -63,9 +65,15 @@ pub fn get_rufs_with_crate_id(crate_id: i32) -> Result<HashMap<Version, Vec<Cond
                 let cond = row.try_get::<usize, String>(3).map_err(|e| e.to_string())?;
                 let cond = if cond.is_empty() { None } else { Some(cond) };
 
-                let ruf = CondRuf::new(cond, ruf);
+                let ruf = CondRuf {
+                    cond: cond,
+                    feature: ruf,
+                };
 
-                dep_rufs.entry(ver).or_insert_with(Vec::new).push(ruf);
+                dep_rufs
+                    .entry(ver)
+                    .or_insert_with(CondRufs::empty)
+                    .push(ruf);
             }
         }
     }
@@ -74,9 +82,7 @@ pub fn get_rufs_with_crate_id(crate_id: i32) -> Result<HashMap<Version, Vec<Cond
 }
 
 #[allow(unused)]
-pub fn get_rufs_with_crate_name(
-    crate_name: &str,
-) -> Result<HashMap<Version, Vec<CondRuf>>, String> {
+pub fn get_rufs_with_crate_name(crate_name: &str) -> Result<HashMap<Version, CondRufs>, String> {
     let crate_id = get_crate_id_with_name(crate_name)?;
     get_rufs_with_crate_id(crate_id)
 }

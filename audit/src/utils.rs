@@ -1,34 +1,27 @@
 use std::env::current_exe;
-use std::fs::File;
-use std::io::{BufRead, BufReader, Write};
-use std::mem::MaybeUninit;
+use std::io::{BufRead, BufReader};
 use std::process::Stdio;
-use std::sync::Mutex;
 use std::thread;
 
 use basic_usages::external::fxhash::{FxHashMap as HashMap, FxHashSet as HashSet};
-use dep_manager::petgraph::visit;
-use dep_manager::DepManager;
+use basic_usages::ruf_check_info::{CheckInfo, UsedRufs};
 
 use ansi_term::{Color, Style};
 use lazy_static::lazy_static;
 use log::debug;
+use petgraph::visit;
 use regex::Regex;
 
-use basic_usages::ruf_build_info::{BuildInfo, UsedRufs};
-
-use crate::config::AuditConfig;
-
-use super::{cargo, scan};
+use crate::build_config::BuildConfig;
+use crate::cargo;
+use crate::dep_manager::DepManager;
 
 // Some regex definitions.
 lazy_static! {
-    static ref RE_USEDFEATS: Regex = Regex::new(r"FDelimiter::\{(.*?)\}::FDelimiter").unwrap();
-    static ref RE_BUILDINFO: Regex = Regex::new(r"BDelimiter::\{(.*?)\}::BDelimiter").unwrap();
-    // static ref RE_INFOS: Regex =
-    //     Regex::new(r"\s+Compiling\s+(\w+)\s+v([\d.]+)\s+\((.*?)\)").unwrap();
-    static ref BOLD_RED: Style = Style::new().bold().fg(Color::Red);
-    static ref BOLD_GREEN: Style = Style::new().bold().fg(Color::Green);
+    pub static ref RE_USEDFEATS: Regex = Regex::new(r"FDelimiter::\{(.*?)\}::FDelimiter").unwrap();
+    pub static ref RE_CHECKINFO: Regex = Regex::new(r"CDelimiter::\{(.*?)\}::CDelimiter").unwrap();
+    pub static ref BOLD_RED: Style = Style::new().bold().fg(Color::Red);
+    pub static ref BOLD_GREEN: Style = Style::new().bold().fg(Color::Green);
 }
 
 // lazy_static! {
@@ -37,9 +30,9 @@ lazy_static! {
 
 /// Create a wrapper around cargo and rustc,
 /// this function shall be called only once, at first layer.
-pub fn cargo_wrapper(config: AuditConfig) -> i32 {
+pub fn cargo_wrapper(mut config: BuildConfig) -> i32 {
     // We check ruf usage first
-    let buildinfos = match rustc_wrapper() {
+    let used_rufs = match rustc_wrapper(&mut config) {
         Ok(used_rufs) => used_rufs,
         Err(err) => {
             error_print(&err);
@@ -50,11 +43,11 @@ pub fn cargo_wrapper(config: AuditConfig) -> i32 {
     // We fetch the used features, and then we shall check it
     info_print("Finishing", "fetching used rufs");
 
-    println!("[Debug] rufs: {:#?}", buildinfos);
+    println!("[Debug] rufs: {:#?}", used_rufs);
 
     info_print("Starting", "analyzing used rufs");
     // Check rufs
-    if let Err(err) = check_rufs(&config, buildinfos) {
+    if let Err(err) = check_rufs(&config, used_rufs) {
         error_print(&err);
         return -1;
     }
@@ -74,7 +67,7 @@ fn error_print(msg: &str) {
 
 /// This function wrap rustc with our audit tool, and fetch
 /// build configurations in the crate.
-fn rustc_wrapper() -> Result<HashMap<String, BuildInfo>, String> {
+fn rustc_wrapper(config: &mut BuildConfig) -> Result<HashMap<String, UsedRufs>, String> {
     let mut cmd = cargo();
     cmd.arg("rustc");
 
@@ -94,43 +87,29 @@ fn rustc_wrapper() -> Result<HashMap<String, BuildInfo>, String> {
     info_print("Starting", "scan rufs");
     // Resolving stdout and stderr infos
     let stdout_handle = thread::spawn(move || {
-        let mut buildinfos: HashMap<String, (HashSet<String>, HashSet<String>)> =
+        let mut checkinfos: HashMap<String, (HashSet<String>, HashSet<String>)> =
             HashMap::default();
 
         for line in stdout.lines() {
             debug!("Stdout: {line:?}");
             let line = line.expect("Fatal, get stdout line fails");
 
-            if let Some(caps) = RE_BUILDINFO.captures(&line) {
-                let info = BuildInfo::from(
+            if let Some(caps) = RE_CHECKINFO.captures(&line) {
+                let info = CheckInfo::from(
                     caps.get(1)
                         .expect("Fatal, resolve buildinfo fails")
                         .as_str(),
                 );
-                let entry = buildinfos
+                let entry = checkinfos
                     .entry(info.crate_name)
                     .or_insert_with(|| (HashSet::default(), HashSet::default()));
 
-                entry.0.extend(info.used_rufs.0.into_iter());
+                entry.0.extend(info.used_rufs.into_iter());
                 entry.1.extend(info.cfg.into_iter());
             }
         }
 
-        let buildinfos = buildinfos
-            .into_iter()
-            .map(|(crate_name, (used_rufs, cfgs))| {
-                (
-                    crate_name.clone(),
-                    BuildInfo {
-                        used_rufs: UsedRufs::new(used_rufs.into_iter().collect()),
-                        crate_name,
-                        cfg: cfgs.into_iter().collect(),
-                    },
-                )
-            })
-            .collect();
-
-        return buildinfos;
+        return checkinfos;
     });
 
     let stderr_handle = thread::spawn(move || {
@@ -148,7 +127,7 @@ fn rustc_wrapper() -> Result<HashMap<String, BuildInfo>, String> {
     });
 
     // Waiting for process to ends
-    let buildinfos = stdout_handle
+    let checkinfos = stdout_handle
         .join()
         .expect("Fatal, cannot join stdout thread");
     let _ = stderr_handle
@@ -163,10 +142,16 @@ fn rustc_wrapper() -> Result<HashMap<String, BuildInfo>, String> {
         return Err("Fatal, cargo process run fails".to_string());
     }
 
-    return Ok(buildinfos);
+    let mut used_rufs = HashMap::default();
+    for (crate_name, (rufs, cfgs)) in checkinfos {
+        config.update_buildinfo(crate_name.clone(), cfgs);
+        used_rufs.insert(crate_name, UsedRufs::new(rufs.into_iter().collect()));
+    }
+
+    return Ok(used_rufs);
 }
 
-fn check_rufs(config: &AuditConfig, buildinfos: HashMap<String, BuildInfo>) -> Result<(), String> {
+fn check_rufs(config: &BuildConfig, used_rufs: HashMap<String, UsedRufs>) -> Result<(), String> {
     let dm = DepManager::new()?;
 
     // Check ruf usage in BFS mode.
@@ -177,12 +162,12 @@ fn check_rufs(config: &AuditConfig, buildinfos: HashMap<String, BuildInfo>) -> R
     let mut bfs = visit::Bfs::new(&graph, root);
     while let Some(nx) = bfs.next(&graph) {
         let node = &graph[nx];
-        let info = buildinfos.get(node.name.as_str()).expect(&format!(
-            "Fatal, cannot find buildinfo for crate {}",
+        let rufs = used_rufs.get(node.name.as_str()).expect(&format!(
+            "Fatal, cannot fetch used rufs for crate {}",
             node.name
         ));
 
-        if !DepManager::rufs_usable(&info.used_rufs, config.get_rust_version()) {
+        if !config.rufs_usable(&rufs) {
             issued_depnx = Some(nx);
             break;
         }
@@ -193,7 +178,6 @@ fn check_rufs(config: &AuditConfig, buildinfos: HashMap<String, BuildInfo>) -> R
         return Ok(());
     }
 
-
     // We found a ruf issue
     let issued_depnx = issued_depnx.unwrap();
     let issued_dep = &graph[issued_depnx];
@@ -203,48 +187,36 @@ fn check_rufs(config: &AuditConfig, buildinfos: HashMap<String, BuildInfo>) -> R
         &format!("dep '{}' cause ruf issues", issued_dep.name),
     );
 
+    // Canditate versions, restricted by semver, no rufs checks
     let candidate_vers = dm.get_candidates(issued_depnx)?;
+    println!("[Debug] candidates: {:?}", candidate_vers);
 
-    println!("candidate_vers: {:?}", candidate_vers);
-    unimplemented!()
-    // // println!("[Debug] candidates: {:?}", candidate_vers);
-    // let current_ver = issued_dep.version;
-    // let mut usable_vers = vec![];
+    info_print(
+        "\tFixing",
+        &format!(
+            "filter usable version from {} candidate versions",
+            candidate_vers.len()
+        ),
+    );
 
-    // info_print(
-    //     "\tFixing",
-    //     &format!(
-    //         "filter usable version from {} versions",
-    //         candidate_vers.len()
-    //     ),
-    // );
+    // here we check rufs
+    let mut usable_vers = vec![];
 
-    // for cad in &candidate_vers {
-    //     if cad.0 == &current_ver {
-    //         continue;
-    //     }
+    for cad in candidate_vers {
+        let used_rufs = config.filter_rufs(cad.1)?;
+        if config.rufs_usable(&used_rufs) {
+            usable_vers.push(cad.0);
+        }
+    }
 
-    //     let is_usable = match check_candidate(config, &cad.1) {
-    //         Ok(is_usable) => is_usable,
-    //         Err(err) => {
-    //             error_print(&err);
-    //             continue;
-    //         }
-    //     };
-
-    //     if is_usable {
-    //         usable_vers.push(cad.0);
-    //     }
-    // }
-
-    // info_print(
-    //     "\tFixing",
-    //     &format!(
-    //         "found {} usable version: {:?}",
-    //         usable_vers.len(),
-    //         usable_vers
-    //     ),
-    // );
+    info_print(
+        "\tFixing",
+        &format!(
+            "found {} usable version: {:?}",
+            usable_vers.len(),
+            usable_vers
+        ),
+    );
 
     // if usable_vers.is_empty() {
     //     return Err(format!(
@@ -253,65 +225,5 @@ fn check_rufs(config: &AuditConfig, buildinfos: HashMap<String, BuildInfo>) -> R
     //     ));
     // }
 
-    // unimplemented!()
+    unimplemented!()
 }
-
-// /// Check whether the candidate version is usable.
-// fn check_candidate(config: &AuditConfig, rufs: &Vec<Ruf>) -> Result<bool, String> {
-//     let tmp_rsfile_path = config.get_tmp_rsfile();
-//     let mut content = String::new();
-//     let mut used_rufs = vec![];
-//     let livetime_tmp;
-
-//     for ruf in rufs {
-//         if let Some(cond) = &ruf.cond {
-//             content.push_str(&format!(
-//                 "#[cfg_attr({}, feature({}))]\n",
-//                 cond, ruf.feature
-//             ))
-//         } else {
-//             used_rufs.push(ruf.feature.as_str());
-//         }
-//     }
-
-//     // We determine the rufs used first
-//     if !content.is_empty() {
-//         let mut f = File::open(tmp_rsfile_path).expect("Fatal, cannot open tmp file");
-//         f.write_all(content.as_bytes())
-//             .expect("Fatal, cannot write tmp file");
-
-//         let output = scan()
-//             .args(["--crate-name", "TODO", tmp_rsfile_path])
-//             .env("LD_LIBRARY_PATH", config.get_rustlib_path())
-//             .output()
-//             .expect("Fatal, cannot fetch scanner output");
-
-//         if !output.status.success() {
-//             return Err(format!(
-//                 "Fatal, cannot check candidate rufs: {}",
-//                 String::from_utf8_lossy(&output.stderr)
-//             ));
-//         }
-
-//         let stdout = String::from_utf8_lossy(&output.stdout);
-//         if let Some(caps) = RE_FEATURES.captures(&stdout) {
-//             livetime_tmp =
-//                 CrateRufs::from(caps.get(1).expect("Fatal, resolve ruf fails").as_str()).rufs;
-//             for ruf in &livetime_tmp {
-//                 assert!(ruf.cond.is_none());
-//                 used_rufs.push(ruf.feature.as_str());
-//             }
-//         }
-//     }
-
-//     if used_rufs
-//         .iter()
-//         .filter(|ruf| !lifetime::get_ruf_status(ruf, config.get_rust_version()).is_usable())
-//         .count()
-//         > 0
-//     {
-//         return Ok(false);
-//     } else {
-//         return Ok(true);
-//     }
-// }

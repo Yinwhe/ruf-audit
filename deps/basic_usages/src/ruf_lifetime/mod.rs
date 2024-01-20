@@ -1,6 +1,6 @@
 mod lifetime;
 
-use super::ruf_build_info::RufStatus;
+use super::ruf_check_info::RufStatus;
 use fxhash::FxHashMap;
 use lazy_static::lazy_static;
 

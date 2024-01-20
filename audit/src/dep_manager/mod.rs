@@ -7,9 +7,6 @@ use tame_index::index::{FileLock, RemoteSparseIndex};
 
 mod r#impl;
 
-// re-export
-pub use petgraph;
-
 pub struct DepManager {
     // lockfile: Lockfile,
     index: RemoteSparseIndex,
