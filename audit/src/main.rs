@@ -20,7 +20,7 @@ fn main() {
     );
 
     // TODO: Make args parse better
-    let args = args().collect::<Vec<String>>();
+    let mut args = args().collect::<Vec<String>>();
     if args.len() >= 3 {
         debug!("Long args: {args:?}");
 
@@ -37,8 +37,11 @@ fn main() {
         } else {
             // And here we do the scan operation
             debug!("Use audit, pass by pipe");
+            // We need to collect build configs.
+            args[0] = "--buildinfo".to_string();
+            args[1] = "--".to_string();
             scan()
-                .args(&args[2..])
+                .args(&args)
                 .env("LD_LIBRARY_PATH", config.get_rustlib_path())
                 .spawn()
                 .expect("Fatal, cannot run scanner")
@@ -47,7 +50,7 @@ fn main() {
                 .status
         };
 
-        exit(status.code().unwrap_or(0))
+        exit(status.code().unwrap_or(-1))
     } else {
         warn!("Exec cargo_wrapper, this function shall be exec only once globally!");
 
@@ -59,7 +62,7 @@ fn main() {
 /// Do some init things, and return needed lib path.
 fn init() -> AuditConfig {
     CombinedLogger::init(vec![WriteLogger::new(
-        LevelFilter::Debug,
+        LevelFilter::Info,
         Config::default(),
         File::options()
             .write(true)

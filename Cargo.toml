@@ -2,10 +2,10 @@
 members = [
     "scanner",
     "audit",
-    "deps/features", "deps/db_usage", "deps/lifetime", "deps/dep_checker",
+    "deps/dep_manager", "deps/basic_usages",
 ]
 exclude = [
-    "test"
+    "test",
 ]
 
 resolver = "2"

@@ -84,6 +84,7 @@ impl AuditConfig {
             .expect("Fatal, cannot convert tmp file path to str")
     }
 
+    #[inline]
     pub fn get_rust_version(&self) -> u32 {
         self.rust_version
     }

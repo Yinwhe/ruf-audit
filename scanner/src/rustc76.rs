@@ -4,8 +4,8 @@ use std::io::{self, Read};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use features::CrateRufs;
-
+use basic_usages::ruf_build_info::{BuildInfo, UsedRufs};
+use getopts::Options;
 use rustc_driver::{
     args, catch_with_exit_code, diagnostics_registry, handle_options, Callbacks, Compilation,
     TimePassesCallbacks, DEFAULT_LOCALE_RESOURCES,
@@ -16,7 +16,7 @@ use rustc_errors::ErrorGuaranteed;
 use rustc_feature::Features;
 use rustc_interface::interface;
 use rustc_session::config::{self, ErrorOutputType, Input};
-use rustc_session::output::find_crate_name;
+// use rustc_session::output::find_crate_name;
 use rustc_session::EarlyErrorHandler;
 use rustc_span::symbol::sym;
 use rustc_span::FileName;
@@ -34,7 +34,31 @@ pub fn run_rustc() -> i32 {
                 })
             })
             .collect::<Vec<_>>();
-        run_compiler(&args, &mut callbacks)
+
+        let split_index = args.iter().position(|x| x == "--").unwrap_or(args.len());
+        let (my_args, rustc_args) = args.split_at(split_index);
+
+        let mut opts = Options::new();
+        opts.optflag("h", "help", "Print help information");
+        opts.optflag("b", "buildinfo", "Print build information, or only print used rufs");
+        let matches = opts.parse(&my_args[1..]).map_err(|e| {
+            handler.early_error(format!("failed to parse cli args: {}", e))
+        })?;
+
+        // println!("args: {args:?}");
+        // println!("my_args: {my_args:?}");
+        // println!("rustc_args: {rustc_args:?}");
+
+        // TODO: Write help info
+        if matches.opt_present("h") || rustc_args.is_empty() {
+            unimplemented!()
+        }
+
+        if matches.opt_present("b") {
+            run_compiler(true, &rustc_args, &mut callbacks)
+        } else {
+            run_compiler(false, &rustc_args, &mut callbacks)
+        }
     });
 
     exit_code
@@ -42,6 +66,7 @@ pub fn run_rustc() -> i32 {
 
 // TODO: Is it correct?
 fn run_compiler(
+    output_buildinfo: bool,
     at_args: &[String],
     callbacks: &mut (dyn Callbacks + Send),
 ) -> interface::Result<()> {
@@ -59,7 +84,7 @@ fn run_compiler(
     let sopts = config::build_session_options(&mut default_handler, &matches);
 
     let crate_name: Vec<String> = matches.opt_strs("crate-name");
-    assert!(crate_name.len() == 1, "Fatal, fetch crate name errors");
+    
 
     let mut config = interface::Config {
         opts: sopts,
@@ -129,7 +154,7 @@ fn run_compiler(
                 rustc_expand::config::pre_configure_attrs(sess, &krate.attrs);
 
             // parse `#[crate_name]` even if `--crate-name` was passed, to make sure it matches.
-            let crate_name = find_crate_name(sess, &pre_configured_attrs);
+            // let crate_name = find_crate_name(sess, &pre_configured_attrs);
 
             let f = features(&pre_configured_attrs).declared_features;
 
@@ -146,14 +171,21 @@ fn run_compiler(
             Ok(Some(f))
         })?;
 
-        if let Some(mut features) = features {
-            let features: Vec<String> = features.drain().map(|sym| sym.to_string()).collect();
-            let crate_name = crate_name.first().unwrap().clone();
+        let used_rufs = features
+            .map(|mut feats| feats.drain().map(|sym| sym.to_string()).collect())
+            .unwrap_or(Vec::new());
 
-            // Print the featuers
-            if !features.is_empty() {
-                println!("{}", CrateRufs::from_vec(crate_name, features));
-            }
+        if output_buildinfo {
+            assert!(crate_name.len() == 1, "Fatal, fetch crate name errors");
+            let build_info = BuildInfo{
+                crate_name: crate_name.first().unwrap().clone(),
+                used_rufs: UsedRufs::new(used_rufs),
+                cfg: matches.opt_strs("cfg"),
+            };
+
+            println!("{}", build_info);
+        } else {
+            println!("{}", UsedRufs::new(used_rufs));
         }
 
         Ok(())

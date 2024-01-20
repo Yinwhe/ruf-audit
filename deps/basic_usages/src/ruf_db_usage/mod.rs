@@ -1,9 +1,11 @@
-use std::{collections::HashMap, sync::Mutex};
+use std::sync::Mutex;
 
-use features::Ruf;
+use fxhash::FxHashMap as HashMap;
 use lazy_static::lazy_static;
 use postgres::{Client, NoTls};
 use semver::Version;
+
+use super::ruf_build_info::CondRuf;
 
 /*
 CREATE VIEW version_ruf AS
@@ -43,7 +45,7 @@ pub fn get_crate_id_with_name(crate_name: &str) -> Result<i32, String> {
 }
 
 #[allow(unused)]
-pub fn get_rufs_with_crate_id(crate_id: i32) -> Result<HashMap<Version, Vec<Ruf>>, String> {
+pub fn get_rufs_with_crate_id(crate_id: i32) -> Result<HashMap<Version, Vec<CondRuf>>, String> {
     let rows = CONN
         .lock()
         .unwrap()
@@ -53,7 +55,7 @@ pub fn get_rufs_with_crate_id(crate_id: i32) -> Result<HashMap<Version, Vec<Ruf>
         )
         .map_err(|e| e.to_string())?;
 
-    let mut dep_rufs = HashMap::new();
+    let mut dep_rufs = HashMap::default();
     for row in rows {
         let ver: String = row.get(1);
         if let Ok(ver) = Version::parse(&ver) {
@@ -61,7 +63,7 @@ pub fn get_rufs_with_crate_id(crate_id: i32) -> Result<HashMap<Version, Vec<Ruf>
                 let cond = row.try_get::<usize, String>(3).map_err(|e| e.to_string())?;
                 let cond = if cond.is_empty() { None } else { Some(cond) };
 
-                let ruf = Ruf::new(cond, ruf);
+                let ruf = CondRuf::new(cond, ruf);
 
                 dep_rufs.entry(ver).or_insert_with(Vec::new).push(ruf);
             }
@@ -72,7 +74,9 @@ pub fn get_rufs_with_crate_id(crate_id: i32) -> Result<HashMap<Version, Vec<Ruf>
 }
 
 #[allow(unused)]
-pub fn get_rufs_with_crate_name(crate_name: &str) -> Result<HashMap<Version, Vec<Ruf>>, String> {
+pub fn get_rufs_with_crate_name(
+    crate_name: &str,
+) -> Result<HashMap<Version, Vec<CondRuf>>, String> {
     let crate_id = get_crate_id_with_name(crate_name)?;
     get_rufs_with_crate_id(crate_id)
 }

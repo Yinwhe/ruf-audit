@@ -8,4 +8,6 @@ edition = "2021"
 [dependencies]
 dep1 = { path = "../dep1"}
 dep2 = { path = "../dep2"}
-clucstr = "1.1.91"
+clucstr = "1.1.9"
+
+[features]

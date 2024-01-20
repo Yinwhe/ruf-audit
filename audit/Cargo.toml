@@ -11,11 +11,6 @@ simplelog = "0.12.1"
 regex = "1.10.2"
 lazy_static = "1.4.0"
 ansi_term = "0.12.1"
-fxhash = "0.2.1"
-petgraph = "0.6.4"
-semver = "1.0.21"
 
-features = { path = "../deps/features" } 
-dep_checker = { path = "../deps/dep_checker" }
-lifetime = { path = "../deps/lifetime" }
-db_usage = { path = "../deps/db_usage" }
+basic_usages = { path = "../deps/basic_usages" }
+dep_manager = { path = "../deps/dep_manager" }

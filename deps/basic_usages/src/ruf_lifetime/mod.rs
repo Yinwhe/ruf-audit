@@ -1,10 +1,10 @@
 mod lifetime;
 
-use features::RufStatus;
+use super::ruf_build_info::RufStatus;
 use fxhash::FxHashMap;
 use lazy_static::lazy_static;
 
-use lifetime::RUSTC_VER_NUM;
+pub use lifetime::RUSTC_VER_NUM;
 
 lazy_static! {
     static ref RUF_LIFETIME: FxHashMap<&'static str, [u8; RUSTC_VER_NUM]> =

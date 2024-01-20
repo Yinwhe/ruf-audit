@@ -2,26 +2,15 @@ use std::fmt::Display;
 
 use super::*;
 
-impl Ruf {
+impl CondRuf {
     pub fn new(cond: Option<String>, feature: String) -> Self {
-        Ruf { cond, feature }
+        CondRuf { cond, feature }
     }
 }
 
-impl CrateRufs {
-    pub fn new(crate_name: String, rufs: Vec<Ruf>) -> Self {
-        CrateRufs { crate_name, rufs }
-    }
-
-    pub fn from_vec(crate_name: String, no_cond_rufs: Vec<String>) -> Self {
-        let mut rufs_vec = Vec::new();
-        for ruf in no_cond_rufs {
-            rufs_vec.push(Ruf::new(None, ruf));
-        }
-        CrateRufs {
-            crate_name,
-            rufs: rufs_vec,
-        }
+impl UsedRufs {
+    pub fn new(rufs: Vec<String>) -> Self {
+        UsedRufs(rufs)
     }
 }
 
@@ -34,8 +23,29 @@ impl RufStatus {
     }
 }
 
+impl Display for BuildInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "\nBDelimiter::{{{}}}::BDelimiter\n",
+            serde_json::to_string(&self).expect("Fatal, serialize fails")
+        )
+    }
+}
 
-impl Display for CrateRufs {
+impl Into<String> for BuildInfo {
+    fn into(self) -> String {
+        format!("{self}")
+    }
+}
+
+impl From<&str> for BuildInfo {
+    fn from(value: &str) -> Self {
+        serde_json::from_str(&value).expect("Fatal, deserialize fails")
+    }
+}
+
+impl Display for UsedRufs {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -45,17 +55,18 @@ impl Display for CrateRufs {
     }
 }
 
-impl Into<String> for CrateRufs {
+impl Into<String> for UsedRufs {
     fn into(self) -> String {
         format!("{self}")
     }
 }
 
-impl From<&str> for CrateRufs {
+impl From<&str> for UsedRufs {
     fn from(value: &str) -> Self {
         serde_json::from_str(&value).expect("Fatal, deserialize fails")
     }
 }
+
 
 impl From<&str> for RufStatus {
     fn from(value: &str) -> Self {
