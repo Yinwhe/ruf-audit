@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 cargo-lock = { version = "9.0.0", features = ["dependency-tree"] }
 tame-index = { version = "0.9.1", features = ["sparse"] }
+cargo_metadata = "0.18.1"
 petgraph = "0.6.4"
 
 basic_usages = { path = "../basic_usages" }

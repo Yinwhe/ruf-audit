@@ -1,5 +1,9 @@
-use cargo_lock::{Lockfile, dependency::Tree};
-use tame_index::index::{RemoteSparseIndex, FileLock};
+use basic_usages::external::fxhash::FxHashMap as HashMap;
+
+use cargo_lock::dependency::Tree;
+// use cargo_lock::Lockfile;
+use cargo_metadata::semver::VersionReq;
+use tame_index::index::{FileLock, RemoteSparseIndex};
 
 mod r#impl;
 
@@ -7,8 +11,10 @@ mod r#impl;
 pub use petgraph;
 
 pub struct DepManager {
-    lockfile: Lockfile,
+    // lockfile: Lockfile,
     index: RemoteSparseIndex,
     lock: FileLock,
+
     dep_tree: Tree,
+    local_crates: HashMap<String, Vec<(String, VersionReq)>>,
 }

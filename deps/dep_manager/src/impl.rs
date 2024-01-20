@@ -4,10 +4,12 @@ use basic_usages::ruf_build_info::{CondRuf, UsedRufs};
 
 use cargo_lock::dependency::graph::{EdgeDirection, Graph, NodeIndex};
 use cargo_lock::Lockfile;
+use cargo_metadata::semver::VersionReq;
+use cargo_metadata::MetadataCommand;
 use petgraph::visit::EdgeRef;
 use tame_index::external::reqwest;
 use tame_index::index::FileLock;
-use tame_index::{IndexLocation, IndexVersion, KrateName, SparseIndex};
+use tame_index::{IndexLocation, KrateName, SparseIndex};
 
 use super::DepManager;
 
@@ -27,6 +29,28 @@ impl DepManager {
             )
         })?;
 
+        let metadata = MetadataCommand::new()
+            .exec()
+            .map_err(|e| format!("Fatal, cannot build DepManager, load metadata fails: {}", e))?;
+
+        let mut local_crates = HashMap::default();
+
+        for pkg in metadata.packages {
+            // Local crates
+            if pkg.source.is_none() {
+                let name_ver = format!("{}-{}", pkg.name, pkg.version);
+                let deps = pkg
+                    .dependencies
+                    .into_iter()
+                    .map(|dep| {
+                        let req = dep.req;
+                        (dep.name, req)
+                    })
+                    .collect();
+                local_crates.insert(name_ver, deps);
+            }
+        }
+
         let index = SparseIndex::new(IndexLocation::default())
             .map_err(|e| format!("Fatal, cannot build DepManager, setup index fails: {}", e))?;
         let client = reqwest::blocking::Client::builder().build().map_err(|e| {
@@ -40,19 +64,13 @@ impl DepManager {
         let lock = FileLock::unlocked();
 
         Ok(Self {
-            lockfile,
-            dep_tree,
+            // lockfile,
             index,
             lock,
+
+            dep_tree,
+            local_crates,
         })
-    }
-
-    pub fn update_lockfile(&mut self) -> Result<(), String> {
-        let lockfile = Lockfile::load("Cargo.lock")
-            .map_err(|e| format!("Fatal, cannot update lockfile, load lock file fails: {}", e))?;
-        self.lockfile = lockfile;
-
-        Ok(())
     }
 
     pub fn get_candidates(
@@ -68,19 +86,25 @@ impl DepManager {
         // collect version req
         let mut version_reqs = Vec::new();
         for p in parents {
-            let meta = self.get_package_metadata(p)?;
+            let meta = self.get_package_reqs(p)?;
             let req = meta
-                .dependencies()
-                .iter()
-                .find(|dep| dep.crate_name() == pkg.name.as_str())
+                .into_iter()
+                .find(|(name, _)| name == pkg.name.as_str())
                 .expect("Fatal, cannot find dependency in parent package")
-                .version_requirement();
+                .1;
             version_reqs.push(req);
         }
 
+        // We filter out version that:
+        // 1. match its dependents' version req
+        // 2. smaller than current version
         let candidates = candidates
             .into_iter()
-            .filter(|(key, _)| version_reqs.iter().all(|req| req.matches(key)))
+            .filter(|(key, _)| {
+                version_reqs
+                    .iter()
+                    .all(|req| req.matches(key) && key < &pkg.version)
+            })
             .collect();
 
         Ok(candidates)
@@ -113,11 +137,20 @@ impl DepManager {
         self.dep_tree.graph()
     }
 
-    fn get_package_metadata(&self, pkgnx: NodeIndex) -> Result<IndexVersion, String> {
+    pub fn update_pkg() {}
+
+    fn get_package_reqs(&self, pkgnx: NodeIndex) -> Result<Vec<(String, VersionReq)>, String> {
         let pkg = &self.graph()[pkgnx];
         let name = pkg.name.as_str();
         let ver = pkg.version.to_string();
 
+        // check whether local crates
+        let key = format!("{name}-{ver}");
+        if self.local_crates.contains_key(&key) {
+            return Ok(self.local_crates[&key].clone());
+        }
+
+        // else we fetch from remote
         let krate: KrateName = name
             .try_into()
             .expect(&format!("Fatal, cannot convert {name} to KrateName"));
@@ -132,7 +165,14 @@ impl DepManager {
             .map(|krate| krate.versions.into_iter().find(|iv| iv.version == ver))
             .flatten()
         {
-            return Ok(iv);
+            return Ok(iv
+                .dependencies()
+                .into_iter()
+                .map(|dep| {
+                    let req = dep.version_requirement();
+                    (dep.crate_name().to_string(), req)
+                })
+                .collect());
         }
 
         // Or from remote
@@ -145,7 +185,14 @@ impl DepManager {
             .map(|krate| krate.versions.into_iter().find(|iv| iv.version == ver))
             .flatten()
         {
-            return Ok(iv);
+            return Ok(iv
+                .dependencies()
+                .into_iter()
+                .map(|dep| {
+                    let req = dep.version_requirement();
+                    (dep.crate_name().to_string(), req)
+                })
+                .collect());
         }
 
         Err(format!(

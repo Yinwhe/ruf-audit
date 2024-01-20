@@ -205,6 +205,7 @@ fn check_rufs(config: &AuditConfig, buildinfos: HashMap<String, BuildInfo>) -> R
 
     let candidate_vers = dm.get_candidates(issued_depnx)?;
 
+    println!("candidate_vers: {:?}", candidate_vers);
     unimplemented!()
     // // println!("[Debug] candidates: {:?}", candidate_vers);
     // let current_ver = issued_dep.version;
