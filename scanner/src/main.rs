@@ -24,7 +24,7 @@ extern crate rustc_target;
 mod rustc76;
 
 fn main() {
-    let exit_code = rustc76::run_rustc();
+    let exit_code = rustc76::run();
 
     exit(exit_code)
 }

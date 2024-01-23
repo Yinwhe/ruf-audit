@@ -10,11 +10,14 @@ cargo-lock = { version = "9.0.0", features = ["dependency-tree"] }
 tame-index = { version = "0.9.1", features = ["sparse"] }
 
 log = "0.4.20"
-simplelog = "0.12.1"
+slog = "2.7"
+slog-async = "2.8"
+sloggers = "2.1.2"
 regex = "1.10.2"
 lazy_static = "1.4.0"
 ansi_term = "0.12.1"
 cargo_metadata = "0.18.1"
 petgraph = "0.6.4"
+getopts = "0.2.21"
 
 basic_usages = { path = "../deps/basic_usages" }

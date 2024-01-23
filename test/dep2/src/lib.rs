@@ -1,4 +1,4 @@
-#![feature(imported_main)]
+// #![feature(imported_main)]
 
 pub fn dep2_hello() {
     println!("Hello, this is dep2 !")

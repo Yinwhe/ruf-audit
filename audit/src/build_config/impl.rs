@@ -1,17 +1,16 @@
 use std::env;
-use std::fs::{File, OpenOptions};
 use std::io::Write;
-use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use basic_usages::external::fxhash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use basic_usages::ruf_check_info::{CondRufs, UsedRufs};
+use basic_usages::ruf_lifetime::{get_ruf_all_status, get_ruf_status};
 
 use super::BuildConfig;
 use crate::scanner;
-use crate::utils::RE_USEDFEATS;
+use crate::RE_USEDFEATS;
 
-impl BuildConfig {
+impl<'short, 'long: 'short> BuildConfig<'long> {
     pub fn default() -> Result<Self, String> {
         let mut rustup = Command::new("rustup");
         rustup.arg("show");
@@ -50,8 +49,6 @@ impl BuildConfig {
             env::var("HOME").map_err(|_| format!("Fatal, cannot fetch cargo home"))? + "/.cargo"
         };
 
-        let tmp_rsfile = PathBuf::from(&rustup_home).join("tmp/audit_tmp.rs");
-
         let crates_cfgs = HashMap::default();
 
         Ok(BuildConfig {
@@ -59,22 +56,26 @@ impl BuildConfig {
             rustup_home,
             cargo_home,
             rust_version: 63,
-            tmp_rsfile,
+            cargo_args: None,
             crates_cfgs,
         })
     }
 
-    pub fn update_buildinfo(&mut self, crate_name: String, cfgs: HashSet<String>) {
-        let entry = self
-            .crates_cfgs
-            .entry(crate_name)
-            .or_insert_with(HashSet::default);
-        entry.extend(cfgs);
+    pub fn update_build_cfgs(&mut self, crate_name: String, cfgs: HashSet<String>) {
+        // println!("[Debug - update_build_cfgs] {crate_name}");
+        // for cfg in &cfgs {
+        //     println!("[Debug - update_build_cfgs] {cfg}");
+        // }
+        self.crates_cfgs.insert(crate_name, cfgs);
+    }
+
+    pub fn update_cargo_args(&mut self, cargo_args: &'long [String]) {
+        self.cargo_args = Some(cargo_args)
     }
 
     /// Filter used rufs in current configurations
-    pub fn filter_rufs(&self, rufs: CondRufs) -> Result<UsedRufs, String> {
-        let tmp_rsfile_path = self.get_tmp_rsfile();
+    pub fn filter_rufs(&self, crate_name: &str, rufs: CondRufs) -> Result<UsedRufs, String> {
+        // let tmp_rsfile_path = self.get_tmp_rsfile();
         let mut content = String::new();
         let mut used_rufs = UsedRufs::empty();
 
@@ -91,14 +92,37 @@ impl BuildConfig {
 
         // use scanner to check cfg rufs
         if !content.is_empty() {
-            let mut f = File::open(tmp_rsfile_path).expect("Fatal, cannot open tmp file");
-            f.write_all(content.as_bytes())
-                .expect("Fatal, cannot write tmp file");
+            let cfgs = self
+                .crates_cfgs
+                .get(crate_name)
+                .expect(&format!("Fatal, no cfgs found with {crate_name}"));
 
-            let output = scanner()
-                .args(["--", tmp_rsfile_path])
+            // println!("[Debug - filter_rufs] {crate_name} {cfgs:?}");
+            let mut cfg_args = String::new();
+            for cfg in cfgs {
+                cfg_args.push_str(&format!("--cfg {}", cfg));
+            }
+
+            let scanner = scanner()
+                .args(["--", "-"])
+                .arg(cfg_args)
+                .stdin(Stdio::piped())
                 .env("LD_LIBRARY_PATH", self.get_rustlib_path())
-                .output()
+                .spawn()
+                .expect("Fatal, cannot spawn scanner output");
+
+            {
+                let mut stdin = scanner
+                    .stdin
+                    .as_ref()
+                    .expect("Fatal, cannot fetch scanner stdin");
+                stdin
+                    .write_all(content.as_bytes())
+                    .expect("Fatal, cannot write to scanner stdin");
+            }
+
+            let output = scanner
+                .wait_with_output()
                 .expect("Fatal, cannot fetch scanner output");
 
             if !output.status.success() {
@@ -124,9 +148,7 @@ impl BuildConfig {
         assert!(self.rust_version < basic_usages::ruf_lifetime::RUSTC_VER_NUM as u32);
         if rufs
             .iter()
-            .filter(|ruf| {
-                !basic_usages::ruf_lifetime::get_ruf_status(ruf, self.rust_version).is_usable()
-            })
+            .filter(|ruf| !get_ruf_status(ruf, self.rust_version).is_usable())
             .count()
             > 0
         {
@@ -134,6 +156,15 @@ impl BuildConfig {
         }
 
         return true;
+    }
+
+    pub fn usable_rustc_for_ruf(&self, ruf: &str) -> HashSet<u32> {
+        get_ruf_all_status(ruf)
+            .into_iter()
+            .enumerate()
+            .filter(|(_, status)| status.is_usable())
+            .map(|(ver, _)| ver as u32)
+            .collect()
     }
 
     pub fn get_rustlib_path(&self) -> String {
@@ -144,18 +175,16 @@ impl BuildConfig {
         )
     }
 
-    fn get_tmp_rsfile(&self) -> &str {
-        if !self.tmp_rsfile.exists() {
-            let _file = OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&self.tmp_rsfile)
-                .expect("Fatal, cannot create tmp file");
-        }
+    pub fn get_audit_rustc_path(&self) -> String {
+        format!(
+            "{rustup_home}/toolchains/nightly-2023-12-12-{host}/bin/rustc",
+            rustup_home = self.rustup_home,
+            host = self.host
+        )
+    }
 
-        self.tmp_rsfile
-            .to_str()
-            .expect("Fatal, cannot convert tmp file path to str")
+    pub fn get_cargo_args(&'long self) -> Option<&'short [String]> {
+        self.cargo_args
     }
 }
 

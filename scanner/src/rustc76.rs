@@ -1,11 +1,11 @@
 // Use nightly-2023-12-12
 use std::env;
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::path::PathBuf;
+use std::process::{Command, Stdio};
 use std::sync::Arc;
 
 use basic_usages::ruf_check_info::{CheckInfo, UsedRufs};
-use getopts::Options;
 use rustc_driver::{
     args, catch_with_exit_code, diagnostics_registry, handle_options, Callbacks, Compilation,
     TimePassesCallbacks, DEFAULT_LOCALE_RESOURCES,
@@ -15,53 +15,135 @@ use rustc_ast::{self as ast, Attribute};
 use rustc_errors::ErrorGuaranteed;
 use rustc_feature::Features;
 use rustc_interface::interface;
-use rustc_session::config::{self, ErrorOutputType, Input};
-// use rustc_session::output::find_crate_name;
+use rustc_session::config::{self, ErrorOutputType, Input, OutFileName};
+use rustc_session::getopts::{Options, Matches};
 use rustc_session::EarlyErrorHandler;
 use rustc_span::symbol::sym;
 use rustc_span::FileName;
 
-pub fn run_rustc() -> i32 {
+use sha2::{Digest, Sha256};
+
+pub fn run() -> i32 {
+    let args = env::args().collect::<Vec<_>>();
     let handler = EarlyErrorHandler::new(ErrorOutputType::default());
 
+    let mut opts = Options::new();
+    opts.optflag("h", "help", "Print help information");
+    opts.optflag(
+        "c",
+        "checkinfo",
+        "Print full check information, or only print used rufs",
+    );
+    opts.optopt(
+        "r",
+        "rustc",
+        "Run empty rustc after scan, not provided for users",
+        "VALUE",
+    );
+
+    let split_index = args
+        .iter()
+        .position(|arg| arg == "--")
+        .unwrap_or_else(|| handler.early_error(format!("no rustc args founds: {args:?}")));
+
+    let my_args = &args[..split_index];
+    let mut rustc_args = args[split_index + 1..].to_vec();
+
+    // println!("args: {args:?}");
+    // println!("my_args: {my_args:?}");
+    // println!("rustc_args: {rustc_args:?}");
+
+
+    let matches = opts.parse(my_args).unwrap_or_else(|e| {
+        handler.early_error(format!("failed to parse cli args: {e}"));
+    });
+
+    // TODO: Write help info
+    if matches.opt_present("h") || rustc_args.is_empty() {
+        unimplemented!()
+    }
+
+    let output_buildinfo = matches.opt_present("c");
+
+    let exit_code = run_rustc(&rustc_args, output_buildinfo);
+
+    // if exit_code != 0 {
+    //     return exit_code;
+    // }
+
+    // // Here we add a rustc phases to generate files for incremental checking
+    // if let Some(rustc_path) = matches.opt_str("rustc") {
+    //     // let args = args::arg_expand_all(&handler, &rustc_args);
+    //     // let Some(matches) = handle_options(&handler, &args) else {
+    //     //     handler.early_error(format!("failed to fetch input file name"))
+    //     // };
+    
+    //     // let input = &matches.free[0];
+    //     // assert!(input != "-", "input file name is stdin");
+    
+    //     // for arg in rustc_args.iter_mut() {
+    //     //     if arg == input {
+    //     //         *arg = "/home/ubuntu/Workspaces/ruf-audit/test/test.rs".to_string();
+    //     //     }
+    //     // }
+    
+    //     // Command::new(rustc_path).args(&rustc_args).exec();
+    //     // unreachable!("exec rustc failed");
+    //     // fetch input file name and we will replace it.
+    //     let args = args::arg_expand_all(&handler, &rustc_args);
+    //     let Some(matches) = handle_options(&handler, &args) else {
+    //         handler.early_error(format!("failed to fetch input file name"))
+    //     };
+
+    //     let input = &matches.free[0];
+    //     assert!(input != "-", "input file name is stdin");
+
+    //     for arg in rustc_args.iter_mut() {
+    //         if arg == input {
+    //             *arg = "-".to_string();
+    //         }
+    //     }
+
+    //     // Read file and generate hash as empty compile contents
+    //     let mut file = File::open(input)
+    //         .unwrap_or_else(|e| handler.early_error(format!("failed to open file: {e}")));
+
+    //     let mut hasher = Sha256::new();
+    //     let mut buffer = [0; 1024];
+
+    //     loop {
+    //         let count = file
+    //             .read(&mut buffer)
+    //             .unwrap_or_else(|e| handler.early_error(format!("failed to read file: {e}")));
+    //         if count == 0 {
+    //             break;
+    //         }
+    //         hasher.update(&buffer[..count]);
+    //     }
+
+    //     let hash = hasher
+    //         .finalize()
+    //         .iter()
+    //         .map(|byte| format!("{:02x}", byte))
+    //         .collect::<String>();
+
+    //     let exit_code = run_actual_rustc(&rustc_path, &rustc_args, &hash)
+    //         .unwrap_or_else(|e| handler.early_error(format!("failed to run rustc: {e}")));
+
+    //     return exit_code;
+    // }
+
+    exit_code
+}
+
+fn run_rustc(args: &Vec<String>, output_buildinfo: bool) -> i32 {
     let mut callbacks = TimePassesCallbacks::default();
+
     let exit_code = catch_with_exit_code(|| {
-        let args = env::args_os()
-            .enumerate()
-            .map(|(i, arg)| {
-                arg.into_string().unwrap_or_else(|arg| {
-                    handler.early_error(format!("argument {i} is not valid Unicode: {arg:?}"))
-                })
-            })
-            .collect::<Vec<_>>();
-
-        let split_index = args.iter().position(|x| x == "--").unwrap_or(args.len());
-        let (my_args, rustc_args) = args.split_at(split_index);
-
-        let mut opts = Options::new();
-        opts.optflag("h", "help", "Print help information");
-        opts.optflag(
-            "c",
-            "checkinfo",
-            "Print full check information, or only print used rufs",
-        );
-        let matches = opts
-            .parse(&my_args[1..])
-            .map_err(|e| handler.early_error(format!("failed to parse cli args: {}", e)))?;
-
-        // println!("args: {args:?}");
-        // println!("my_args: {my_args:?}");
-        // println!("rustc_args: {rustc_args:?}");
-
-        // TODO: Write help info
-        if matches.opt_present("h") || rustc_args.is_empty() {
-            unimplemented!()
-        }
-
-        if matches.opt_present("c") {
-            run_compiler(true, &rustc_args, &mut callbacks)
+        if output_buildinfo {
+            run_compiler(true, args, &mut callbacks)
         } else {
-            run_compiler(false, &rustc_args, &mut callbacks)
+            run_compiler(false, args, &mut callbacks)
         }
     });
 
@@ -77,7 +159,7 @@ fn run_compiler(
     // println!("AUDIT DEBUG: args: {at_args:?}");
     let mut default_handler = EarlyErrorHandler::new(ErrorOutputType::default());
 
-    let at_args = at_args.get(1..).unwrap_or_default();
+    // let at_args = at_args.get(1..).unwrap_or_default();
 
     let args = args::arg_expand_all(&default_handler, at_args);
 
@@ -89,13 +171,14 @@ fn run_compiler(
 
     let crate_name: Vec<String> = matches.opt_strs("crate-name");
 
+    let (odir, ofile) = make_output(&matches);
     let mut config = interface::Config {
         opts: sopts,
         crate_cfg: matches.opt_strs("cfg"),
         crate_check_cfg: matches.opt_strs("check-cfg"),
         input: Input::File(PathBuf::new()),
-        output_file: None,
-        output_dir: None,
+        output_file: ofile,
+        output_dir: odir,
         ice_file: None,
         file_loader: None,
         locale_resources: DEFAULT_LOCALE_RESOURCES,
@@ -131,7 +214,7 @@ fn run_compiler(
     default_handler.abort_if_errors();
     drop(default_handler);
 
-    interface::run_compiler(config, |compiler| {
+    let res = interface::run_compiler(config, |compiler| {
         let sess = &compiler.sess;
 
         let handler = EarlyErrorHandler::new(sess.opts.error_format);
@@ -192,7 +275,9 @@ fn run_compiler(
         }
 
         Ok(())
-    })
+    });
+
+    return res;
 }
 
 /// Extract input (string or file and optional path) from matches.
@@ -239,9 +324,20 @@ fn make_input(
     }
 }
 
+/// Extract output directory and file from matches.
+/// Copy from rustc_driver_impl crates.
+fn make_output(matches: &Matches) -> (Option<PathBuf>, Option<OutFileName>) {
+    let odir = matches.opt_str("out-dir").map(|o| PathBuf::from(&o));
+    let ofile = matches.opt_str("o").map(|o| match o.as_str() {
+        "-" => OutFileName::Stdout,
+        path => OutFileName::Real(PathBuf::from(path)),
+    });
+    (odir, ofile)
+}
+
 /// Procecss features used.
 /// Copy and modify from rustc_expand crates.
-pub fn features(krate_attrs: &[Attribute]) -> Features {
+fn features(krate_attrs: &[Attribute]) -> Features {
     fn feature_list(attr: &Attribute) -> Vec<ast::NestedMetaItem> {
         if attr.has_name(sym::feature)
             && let Some(list) = attr.meta_item_list()
@@ -268,4 +364,33 @@ pub fn features(krate_attrs: &[Attribute]) -> Features {
     }
 
     features
+}
+
+fn run_actual_rustc(
+    rustc_path: &str,
+    rustc_args: &[String],
+    file_contents: &str,
+) -> Result<i32, String> {
+    let mut rustc = Command::new(rustc_path);
+
+    let empty_rs = format!("#[allow(unused)]\nfn main(){{let hash = \"{file_contents}\";}}");
+    let mut rustc = rustc
+        .args(rustc_args)
+        .stdin(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("cannot spawn: {e}"))?;
+
+    if let Some(mut stdin) = rustc.stdin.take() {
+        stdin
+            .write_all(empty_rs.as_bytes())
+            .map_err(|e| format!("cannot write empty fn into rustc stdin: {e}"))?;
+    } else {
+        return Err(format!("cannot open rustc stdin"));
+    }
+
+    let output = rustc
+        .wait_with_output()
+        .map_err(|e| format!("cannot wait rustc output: {e}"))?;
+
+    Ok(output.status.code().unwrap_or(0))
 }
