@@ -21,8 +21,6 @@ use rustc_session::EarlyErrorHandler;
 use rustc_span::symbol::sym;
 use rustc_span::FileName;
 
-use sha2::{Digest, Sha256};
-
 pub fn run() -> i32 {
     let args = env::args().collect::<Vec<_>>();
     let handler = EarlyErrorHandler::new(ErrorOutputType::default());
@@ -47,7 +45,7 @@ pub fn run() -> i32 {
         .unwrap_or_else(|| handler.early_error(format!("no rustc args founds: {args:?}")));
 
     let my_args = &args[..split_index];
-    let mut rustc_args = args[split_index + 1..].to_vec();
+    let rustc_args = args[split_index + 1..].to_vec();
 
     // println!("args: {args:?}");
     // println!("my_args: {my_args:?}");
@@ -366,6 +364,7 @@ fn features(krate_attrs: &[Attribute]) -> Features {
     features
 }
 
+#[allow(unused)]
 fn run_actual_rustc(
     rustc_path: &str,
     rustc_args: &[String],
