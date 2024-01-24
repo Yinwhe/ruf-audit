@@ -35,7 +35,7 @@ pub fn run_rustc(args: &Vec<String>, output_buildinfo: bool) -> i32 {
     exit_code
 }
 
-// TODO: Is it correct?
+// Is it correct?
 fn run_compiler(
     output_buildinfo: bool,
     at_args: &[String],

@@ -43,7 +43,15 @@ lazy_static! {
 }
 
 fn main() {
-    let mut config = init();
+    // Get current config first
+    let mut config = match BuildConfig::default() {
+        Ok(config) => config,
+        Err(e) => {
+            error_print(&format!("{e}"));
+            exit(-1);
+        }
+    };
+
     let args: Vec<String> = env::args().collect();
 
     // info!(LOGGER, "startup command line: {:?}", &args);
@@ -96,8 +104,13 @@ fn main() {
     opts.optflag("", "extract", "Extract rufs used in current configurations");
     opts.optflag(
         "",
+        "newer-fix",
+        "Attempt to choose newer version when fixing dep trees",
+    );
+    opts.optflag(
+        "",
         "quick-fix",
-        "Fix by changing rustc and using minimal dep tree",
+        "Fix by changing rustc and using oldest dep tree",
     );
     opts.optflag("", "verbose", "Print audit detail info");
 
@@ -128,6 +141,10 @@ fn main() {
         exit(0);
     }
 
+    if matches.opt_present("newer-fix") {
+        config.set_newer_fix(true);
+    }
+
     if matches.opt_present("quick-fix") {
         config.set_quick_fix(true);
     }
@@ -141,12 +158,6 @@ fn main() {
     // default we do ruf audit
     let exit_code = audit(config);
     exit(exit_code);
-}
-
-/// Do some init things, and return needed lib path.
-fn init<'long>() -> BuildConfig<'long> {
-    // TODO: fix expect
-    BuildConfig::default().expect("TEMP")
 }
 
 fn scanner() -> Command {

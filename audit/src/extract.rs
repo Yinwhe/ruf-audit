@@ -7,7 +7,7 @@ use basic_usages::ruf_check_info::{CheckInfo, UsedRufs};
 
 use crate::build_config::BuildConfig;
 use crate::error::AuditError;
-use crate::{cargo, RE_CHECKINFO};
+use crate::{cargo, warn_print, RE_CHECKINFO};
 
 // pub fn extract(
 //     config: &mut BuildConfig,
@@ -74,7 +74,7 @@ pub fn extract(
     // recheck: bool,
 ) -> Result<HashMap<String, UsedRufs>, AuditError> {
     let mut cmd = cargo();
-    cmd.arg("rustc");
+    cmd.args(["rustc", "-Z", "unstable-options", "--keep-going"]);
     if let Some(cargo_args) = config.get_cargo_args() {
         cmd.args(cargo_args);
     }
@@ -105,16 +105,26 @@ pub fn extract(
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
+        // let err = stderr
+        //     .lines()
+        //     .into_iter()
+        //     .skip_while(|line| !line.trim_start().starts_with("error"))
+        //     .collect::<Vec<&str>>()
+        //     .join("\n");
+
+        // return Err(AuditError::Unexpected(format!(
+        //     "cargo process run fails: {err:?}",
+        // )));
+
         let err = stderr
             .lines()
             .into_iter()
-            .skip_while(|line| !line.trim_start().starts_with("error"))
-            .collect::<Vec<&str>>()
-            .join("\n");
+            .find(|line| line.trim_start().starts_with("error"))
+            .unwrap_or("unknown error");
 
-        return Err(AuditError::Unexpected(format!(
-            "cargo process run fails: {err:?}",
-        )));
+        // We may not stop here, keeps on going and just print errors, 
+        // since we only cares ruf usage, rather than syntax error or things like that.
+        warn_print("Buiding Issues", &format!("extraction incomplete, mostly due to syntax fatal errors (you can check details with cargo), but we will keep on going: {err}"));
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);

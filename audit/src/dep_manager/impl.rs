@@ -1,5 +1,4 @@
 use std::cell::RefCell;
-use std::collections::HashSet;
 
 use basic_usages::external::fxhash::FxHashMap as HashMap;
 use basic_usages::external::semver::Version;
@@ -83,8 +82,9 @@ impl DepManager<'_> {
             lock,
 
             dep_tree,
-            local_crates,
             req_by,
+
+            local_crates,
         })
     }
 
@@ -110,9 +110,9 @@ impl DepManager<'_> {
         // collect version req
         let mut version_reqs = Vec::new();
         for p in parents {
-            let pkg = &self.graph()[p];
+            let p_pkg = &self.graph()[p];
             let meta =
-                self.get_package_reqs(pkg.name.as_str(), pkg.version.to_string().as_str())?;
+                self.get_package_reqs(p_pkg.name.as_str(), p_pkg.version.to_string().as_str())?;
             let req = meta
                 .into_iter()
                 .find(|(name, _)| name == pkg.name.as_str())
@@ -126,27 +126,42 @@ impl DepManager<'_> {
             version_reqs.push((p, req, lowest));
         }
 
-        // we choose candidates as:
-        // 1. match its dependents' version req
-        // 2. smaller than current version
-        // we will record who restricts the version most, for later up fix
-        let cad_vers = candidates
-            .keys()
-            .filter(|&ver| {
-                version_reqs
-                    .iter()
-                    .all(|(_, req, _)| req.matches(ver) && ver < &pkg.version)
-            })
-            .collect::<HashSet<&Version>>();
-
+        // We assume parents who restricts the version most is the one not allow min_lowest,
+        // and it shall be updated later, if we need up fix.
+        // This assumption won't hold for all cases (cases with complex version req),
+        // but most of the times it will works.
         let min_lowest = version_reqs
             .iter()
             .map(|vr| vr.2)
             .min()
             .expect("Fatal, no min version found");
 
-        // Ok(candidates)
-        unimplemented!()
+        let all_equal = version_reqs.iter().map(|vr| vr.2).all(|v| v == min_lowest);
+
+        let mut req_by = Vec::new();
+        let mut reqs = Vec::new();
+        for version_req in version_reqs {
+            if all_equal || version_req.2 > min_lowest {
+                req_by.push(version_req.0);
+            }
+            reqs.push(version_req.1);
+        }
+
+        self.req_by.borrow_mut().insert(pkgnx, req_by);
+
+        // we choose candidates as:
+        // 1. match its dependents' version req
+        // 2. smaller than current version
+        // we will record who restricts the version most, for later up fix
+        let candidates = candidates
+            .into_iter()
+            .filter(|(ver, _)| {
+                reqs.iter()
+                    .all(|req| req.matches(ver) && ver < &pkg.version)
+            })
+            .collect();
+
+        Ok(candidates)
     }
 
     /// Used in up fix, get candidates for the dependent, which has older version req
@@ -228,6 +243,10 @@ impl DepManager<'_> {
 
     pub fn req_by(&self, dep: &NodeIndex) -> Option<Vec<NodeIndex>> {
         self.req_by.borrow().get(dep).cloned()
+    }
+
+    pub fn is_local(&self, name_ver: &str) -> bool {
+        self.local_crates.contains_key(name_ver)
     }
 
     fn get_package_reqs(

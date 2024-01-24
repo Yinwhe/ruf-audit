@@ -66,6 +66,7 @@ fn check_rufs(
 
     // or we have to things to fix.
     if !config.is_quick_fix() {
+        info_print("\tIssue", "ruf issues exist, try dep tree fix first");
         // if not quick fix, we will do this, since dep tree fix can be hard and slow
         let err = match fix_with_dep(&mut config, used_rufs, &mut dm) {
             Ok(()) => {
@@ -84,16 +85,21 @@ fn check_rufs(
         );
     }
 
+    info_print("\tIssue", "try fix by changing rustc with minimal dep tree");
     let err = match fix_with_rustc(&mut config, &mut dm) {
         Ok(rustc_version) => {
             info_print(
                 "\tFixed",
-                &format!("rustc ^1.{rustc_version}.0 can be used in current configurations"),
+                &format!("rustc 1.{rustc_version}.* can be used in current configurations"),
             );
             return Ok(());
         }
         Err(e) => e,
     };
+    warn_print(
+        "\tFailed",
+        &format!("we cannot fix ruf issues through chaning rustc version: {err}"),
+    );
 
     return Err(err);
 }
@@ -132,8 +138,8 @@ fn fix_with_dep(
         let issued_dep = &graph[issued_depnx];
 
         warn_print(
-            "\tDetecting",
-            &format!("dep '{}' cause ruf issues", issued_dep.name),
+            "\tDetect",
+            &format!("dep '{}' cause ruf issues, try fixing", issued_dep.name),
         );
 
         // Canditate versions, restricted by semver, no rufs checks
@@ -155,19 +161,23 @@ fn fix_with_dep(
         } else {
             usable_vers.into_iter().min()
         };
-        if let Some(ver) = choose {
-            info_print("\tFixing", &format!("changing to version {}", ver));
+        if let Some(fix_ver) = choose {
+            let name = issued_dep.name.to_string();
+            let ver = issued_dep.version.to_string();
+            let fix_ver = fix_ver.to_string();
+
+            info_print(
+                "\tFixing",
+                &format!("changing {name}@{ver} to {name}@{fix_ver}"),
+            );
             // Here previous graph and issue_dep are droped, we have to copy rather than borrow.
-            dm.update_pkg(
-                &issued_dep.name.to_string(),
-                &issued_dep.version.to_string(),
-                ver.to_string().as_str(),
-            )?;
+            dm.update_pkg(&name, &ver, &fix_ver)?;
 
             info_print("\tFixing", "rechecking ruf issues");
             used_rufs = extract(config)?;
         } else {
             // No usable version, maybe parents' version not compatible, we do up fix.
+            warn_print("\tFixing", &format!("no candidates found, do upfix"));
             match up_fix(config, issued_depnx, dm) {
                 Ok(_) => {
                     info_print("\tUpfixing", "rechecking ruf issues");
@@ -176,7 +186,6 @@ fn fix_with_dep(
                 Err(e) => {
                     if !e.is_unexpected() {
                         // TODO: Print fail paths
-                        return Err(AuditError::Functionality(format!("up fix fails")));
                     }
                     return Err(e);
                 }
@@ -205,12 +214,12 @@ fn up_fix(
 
     assert!(p_reqs.len() > 0, "no depdents found");
     for p in &p_reqs {
-        let pkg = &dm.graph()[p.to_owned()];
+        let p_pkg = &dm.graph()[p.to_owned()];
         let p_candidates_vers = dm.get_candidates_up_fix(p.clone(), issued_depnx.clone())?;
 
         let mut usable_vers = vec![];
         for cad in p_candidates_vers {
-            let used_rufs = config.filter_rufs(pkg.name.as_str(), cad.1)?;
+            let used_rufs = config.filter_rufs(p_pkg.name.as_str(), cad.1)?;
             if config.rufs_usable(&used_rufs) {
                 usable_vers.push(cad.0);
             }
@@ -221,14 +230,18 @@ fn up_fix(
         } else {
             usable_vers.into_iter().min()
         };
-        if let Some(ver) = choose {
-            info_print("\tUpfixing", &format!("changing to version {}", ver));
+        if let Some(fix_ver) = choose {
+            let name = p_pkg.name.to_string();
+            let ver = p_pkg.version.to_string();
+            let fix_ver = fix_ver.to_string();
+
+            info_print(
+                "\tUpfixing",
+                &format!("changing {name}@{ver} to {name}@{fix_ver}"),
+            );
             // Here previous graph and issue_dep are droped, we have to copy rather than borrow.
-            dm.update_pkg(
-                &pkg.name.to_string(),
-                &pkg.version.to_string(),
-                ver.to_string().as_str(),
-            )?;
+            dm.update_pkg(&name, &ver, &fix_ver)?;
+
             fix_one = true;
             break;
         }
