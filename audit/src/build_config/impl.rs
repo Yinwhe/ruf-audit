@@ -68,6 +68,7 @@ impl<'short, 'long: 'short> BuildConfig<'long> {
 
             newer_fix: false,
             quick_fix: false,
+            verbose: false,
         })
     }
 
@@ -215,6 +216,16 @@ impl<'short, 'long: 'short> BuildConfig<'long> {
     #[inline]
     pub fn is_quick_fix(&self) -> bool {
         self.quick_fix
+    }
+
+    #[inline]
+    pub fn set_verbose(&mut self, verbose: bool) {
+        self.verbose = verbose
+    }
+
+    #[inline]
+    pub fn is_verbose(&self) -> bool {
+        self.verbose
     }
 }
 

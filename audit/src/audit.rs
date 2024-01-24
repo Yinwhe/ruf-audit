@@ -10,10 +10,6 @@ use crate::error::AuditError;
 use crate::extract::extract;
 use crate::{cargo, error_print, info_print, warn_print};
 
-// lazy_static! {
-//     static ref DEPMANAGER: Mutex<MaybeUninit<DepManager>> = Mutex::new(MaybeUninit::uninit());
-// }
-
 /// The main audit functions,
 /// this function shall be called only once, at first layer.
 pub fn audit(mut config: BuildConfig) -> i32 {

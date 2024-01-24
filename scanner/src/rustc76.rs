@@ -16,125 +16,12 @@ use rustc_errors::ErrorGuaranteed;
 use rustc_feature::Features;
 use rustc_interface::interface;
 use rustc_session::config::{self, ErrorOutputType, Input, OutFileName};
-use rustc_session::getopts::{Options, Matches};
+use rustc_session::getopts::Matches;
 use rustc_session::EarlyErrorHandler;
 use rustc_span::symbol::sym;
 use rustc_span::FileName;
 
-pub fn run() -> i32 {
-    let args = env::args().collect::<Vec<_>>();
-    let handler = EarlyErrorHandler::new(ErrorOutputType::default());
-
-    let mut opts = Options::new();
-    opts.optflag("h", "help", "Print help information");
-    opts.optflag(
-        "c",
-        "checkinfo",
-        "Print full check information, or only print used rufs",
-    );
-    opts.optopt(
-        "r",
-        "rustc",
-        "Run empty rustc after scan, not provided for users",
-        "VALUE",
-    );
-
-    let split_index = args
-        .iter()
-        .position(|arg| arg == "--")
-        .unwrap_or_else(|| handler.early_error(format!("no rustc args founds: {args:?}")));
-
-    let my_args = &args[..split_index];
-    let rustc_args = args[split_index + 1..].to_vec();
-
-    // println!("args: {args:?}");
-    // println!("my_args: {my_args:?}");
-    // println!("rustc_args: {rustc_args:?}");
-
-
-    let matches = opts.parse(my_args).unwrap_or_else(|e| {
-        handler.early_error(format!("failed to parse cli args: {e}"));
-    });
-
-    // TODO: Write help info
-    if matches.opt_present("h") || rustc_args.is_empty() {
-        unimplemented!()
-    }
-
-    let output_buildinfo = matches.opt_present("c");
-
-    let exit_code = run_rustc(&rustc_args, output_buildinfo);
-
-    // if exit_code != 0 {
-    //     return exit_code;
-    // }
-
-    // // Here we add a rustc phases to generate files for incremental checking
-    // if let Some(rustc_path) = matches.opt_str("rustc") {
-    //     // let args = args::arg_expand_all(&handler, &rustc_args);
-    //     // let Some(matches) = handle_options(&handler, &args) else {
-    //     //     handler.early_error(format!("failed to fetch input file name"))
-    //     // };
-    
-    //     // let input = &matches.free[0];
-    //     // assert!(input != "-", "input file name is stdin");
-    
-    //     // for arg in rustc_args.iter_mut() {
-    //     //     if arg == input {
-    //     //         *arg = "/home/ubuntu/Workspaces/ruf-audit/test/test.rs".to_string();
-    //     //     }
-    //     // }
-    
-    //     // Command::new(rustc_path).args(&rustc_args).exec();
-    //     // unreachable!("exec rustc failed");
-    //     // fetch input file name and we will replace it.
-    //     let args = args::arg_expand_all(&handler, &rustc_args);
-    //     let Some(matches) = handle_options(&handler, &args) else {
-    //         handler.early_error(format!("failed to fetch input file name"))
-    //     };
-
-    //     let input = &matches.free[0];
-    //     assert!(input != "-", "input file name is stdin");
-
-    //     for arg in rustc_args.iter_mut() {
-    //         if arg == input {
-    //             *arg = "-".to_string();
-    //         }
-    //     }
-
-    //     // Read file and generate hash as empty compile contents
-    //     let mut file = File::open(input)
-    //         .unwrap_or_else(|e| handler.early_error(format!("failed to open file: {e}")));
-
-    //     let mut hasher = Sha256::new();
-    //     let mut buffer = [0; 1024];
-
-    //     loop {
-    //         let count = file
-    //             .read(&mut buffer)
-    //             .unwrap_or_else(|e| handler.early_error(format!("failed to read file: {e}")));
-    //         if count == 0 {
-    //             break;
-    //         }
-    //         hasher.update(&buffer[..count]);
-    //     }
-
-    //     let hash = hasher
-    //         .finalize()
-    //         .iter()
-    //         .map(|byte| format!("{:02x}", byte))
-    //         .collect::<String>();
-
-    //     let exit_code = run_actual_rustc(&rustc_path, &rustc_args, &hash)
-    //         .unwrap_or_else(|e| handler.early_error(format!("failed to run rustc: {e}")));
-
-    //     return exit_code;
-    // }
-
-    exit_code
-}
-
-fn run_rustc(args: &Vec<String>, output_buildinfo: bool) -> i32 {
+pub fn run_rustc(args: &Vec<String>, output_buildinfo: bool) -> i32 {
     let mut callbacks = TimePassesCallbacks::default();
 
     let exit_code = catch_with_exit_code(|| {

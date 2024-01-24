@@ -5,6 +5,8 @@ use ansi_term::{Color, Style};
 use getopts::Options;
 use lazy_static::lazy_static;
 use regex::Regex;
+
+#[allow(unused)]
 use slog::{debug, info, o, warn, Drain, Logger};
 use slog_async::Async;
 use sloggers::{file::FileLoggerBuilder, Build};
@@ -44,15 +46,15 @@ fn main() {
     let mut config = init();
     let args: Vec<String> = env::args().collect();
 
-    info!(LOGGER, "startup command line: {:?}", &args);
+    // info!(LOGGER, "startup command line: {:?}", &args);
 
     // cargo wrapper usage, act as scanner.
     if args.len() >= 2 && args[1] == config.get_audit_rustc_path() {
-        debug!(LOGGER, "scanner args: {args:?}");
+        // debug!(LOGGER, "scanner args: {args:?}");
 
         // We use original rustc to do some information fetch
         let status = if args[2] == "-" {
-            debug!(LOGGER, "Use rustc, inherit std");
+            // debug!(LOGGER, "Use rustc, inherit std");
             rustc()
                 .args(&args[2..])
                 .spawn()
@@ -61,10 +63,13 @@ fn main() {
                 .expect("Fatal, cannot fetch rustc output")
                 .status
         } else {
-            // And here we do the scan operation
-            debug!(LOGGER, "Use audit, pass by pipe");
-            // We need to collect build configs.
+            // debug!(LOGGER, "Use audit, pass by pipe");
 
+            // And here we do the scan operation, after scan we launch real rustc,
+            // this is essential, since some crates has build scripts or things like that.
+
+            // Besides, we gain incremental check from cargo for launching real rustc, which is good
+            // for later repeated extract process.
             scanner()
                 .args(["--checkinfo", "--rustc", &args[1], "--"])
                 .args(&args[2..])
@@ -88,8 +93,13 @@ fn main() {
 
     let mut opts = Options::new();
     opts.optflag("h", "help", "Print help information");
-    opts.optflag("", "extract", "extract rufs used in current configurations");
-    opts.optflag("", "quick-fix", "fix with rustc and minimal dep tree");
+    opts.optflag("", "extract", "Extract rufs used in current configurations");
+    opts.optflag(
+        "",
+        "quick-fix",
+        "Fix by changing rustc and using minimal dep tree",
+    );
+    opts.optflag("", "verbose", "Print audit detail info");
 
     let matches = match opts.parse(my_args) {
         Ok(m) => m,
@@ -122,12 +132,13 @@ fn main() {
         config.set_quick_fix(true);
     }
 
-    // default we do ruf audit
-    warn!(
-        LOGGER,
-        "Exec audit, this function shall be exec only once globally!"
-    );
+    if matches.opt_present("verbose") {
+        config.set_verbose(true);
+    }
 
+    // warn!(LOGGER, "Exec audit, this function shall be exec only once globally!");
+
+    // default we do ruf audit
     let exit_code = audit(config);
     exit(exit_code);
 }

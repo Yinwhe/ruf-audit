@@ -23,4 +23,6 @@ pub struct BuildConfig<'c> {
     newer_fix: bool,
     // fix with rustc and minimal dep tree, which is the quickest way (default false)
     quick_fix: bool,
+    // print check details
+    verbose: bool,
 }
