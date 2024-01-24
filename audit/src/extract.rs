@@ -15,7 +15,7 @@ pub fn extract(
     // recheck: bool,
 ) -> Result<HashMap<String, UsedRufs>, AuditError> {
     let mut cargo = cargo();
-    cargo.arg("rustc");
+    cargo.arg("check");
     if let Some(cargo_args) = config.get_cargo_args() {
         cargo.args(cargo_args);
     }

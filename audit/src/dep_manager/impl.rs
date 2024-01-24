@@ -12,7 +12,7 @@ use cargo_metadata::MetadataCommand;
 use petgraph::visit::EdgeRef;
 use tame_index::external::reqwest;
 // use tame_index::index::FileLock;
-use tame_index::utils::flock::LockOptions;
+use tame_index::utils::flock::{FileLock, LockOptions};
 use tame_index::{IndexLocation, KrateName, SparseIndex};
 
 use crate::cargo;
@@ -75,12 +75,14 @@ impl DepManager<'_> {
         let lock = LockOptions::cargo_package_lock(None).map_err(|e| {
             AuditError::Unexpected(format!("cannot build DepManager, setup lock fails: {}", e))
         })?;
+        let empty_lock = FileLock::unlocked();
 
         let req_by = RefCell::new(HashMap::default());
         Ok(Self {
             // lockfile,
             index,
             lock,
+            empty_lock,
 
             dep_tree,
             local_crates,
@@ -246,37 +248,41 @@ impl DepManager<'_> {
             .try_into()
             .expect(&format!("Fatal, cannot convert {name} to KrateName"));
 
-        // search local first, lock crates index is needed
-        let lock = self
-            .lock
-            .lock(|_| None)
-            .expect("Fatal, cannot get file lock");
-        let res = self.index.cached_krate(krate.clone(), &lock).map_err(|e| {
-            AuditError::Unexpected(format!(
-                "cannot get package {name}-{ver} metadata from index: {e}"
-            ))
-        })?;
+        // we use remote only, to avoid lock crates index
+        // // search local cache first, lock crates index is needed
+        // let lock = self
+        //     .lock
+        //     .lock(|_| None)
+        //     .expect("Fatal, cannot get file lock");
+        // let res = self.index.cached_krate(krate.clone(), &lock).map_err(|e| {
+        //     AuditError::Unexpected(format!(
+        //         "cannot get package {name}-{ver} metadata from index: {e}"
+        //     ))
+        // })?;
 
-        if let Some(iv) = res
-            .map(|krate| krate.versions.into_iter().find(|iv| iv.version == ver))
-            .flatten()
-        {
-            return Ok(iv
-                .dependencies()
-                .into_iter()
-                .map(|dep| {
-                    let req = dep.version_requirement();
-                    (dep.crate_name().to_string(), req)
-                })
-                .collect());
-        }
+        // if let Some(iv) = res
+        //     .map(|krate| krate.versions.into_iter().find(|iv| iv.version == ver))
+        //     .flatten()
+        // {
+        //     return Ok(iv
+        //         .dependencies()
+        //         .into_iter()
+        //         .map(|dep| {
+        //             let req = dep.version_requirement();
+        //             (dep.crate_name().to_string(), req)
+        //         })
+        //         .collect());
+        // }
 
         // Or from remote
-        let res = self.index.krate(krate, true, &lock).map_err(|e| {
-            AuditError::Unexpected(format!(
-                "cannot get package {name}-{ver} metadata from index: {e}"
-            ))
-        })?;
+        let res = self
+            .index
+            .krate(krate, false, &self.empty_lock)
+            .map_err(|e| {
+                AuditError::Unexpected(format!(
+                    "cannot get package {name}-{ver} metadata from index: {e}"
+                ))
+            })?;
 
         if let Some(iv) = res
             .map(|krate| krate.versions.into_iter().find(|iv| iv.version == ver))

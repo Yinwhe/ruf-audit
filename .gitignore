@@ -4,3 +4,4 @@ target
 debug.log
 Cargo.lock
 alltables_20220811.sql
+test
