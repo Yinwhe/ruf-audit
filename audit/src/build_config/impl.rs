@@ -7,29 +7,34 @@ use basic_usages::ruf_check_info::{CondRufs, UsedRufs};
 use basic_usages::ruf_lifetime::{get_ruf_all_status, get_ruf_status};
 
 use super::BuildConfig;
+use crate::error::AuditError;
 use crate::scanner;
 use crate::RE_USEDFEATS;
 
 impl<'short, 'long: 'short> BuildConfig<'long> {
-    pub fn default() -> Result<Self, String> {
+    pub fn default() -> Result<Self, AuditError> {
         let mut rustup = Command::new("rustup");
         rustup.arg("show");
 
         let output = rustup
             .output()
-            .map_err(|e| format!("Fatal, cannot fetch rustup profiles: {}", e))?;
+            .map_err(|e| AuditError::Unexpected(format!("cannot run rustup: {e}")))?;
 
         let profiles = if output.status.success() {
             String::from_utf8_lossy(&output.stdout)
         } else {
-            return Err(format!("Fatal, cannot fetch rustup profiles"));
+            return Err(AuditError::Unexpected(
+                "cannot fetch rustup profiles".to_string(),
+            ));
         };
 
         let host = {
             let host_line = profiles
                 .lines()
                 .find(|line| line.starts_with("Default host:"))
-                .ok_or_else(|| format!("Fatal, cannot fetch rustup default host"))?;
+                .ok_or_else(|| {
+                    AuditError::Unexpected(format!("cannot fetch rustup default host"))
+                })?;
 
             host_line[13..].trim().to_string()
         };
@@ -38,7 +43,7 @@ impl<'short, 'long: 'short> BuildConfig<'long> {
             let rustup_home_line = profiles
                 .lines()
                 .find(|line| line.starts_with("rustup home:"))
-                .ok_or_else(|| format!("Fatal, cannot fetch rustup home"))?;
+                .ok_or_else(|| AuditError::Unexpected(format!("cannot fetch rustup home")))?;
 
             rustup_home_line[13..].trim().to_string()
         };
@@ -46,7 +51,9 @@ impl<'short, 'long: 'short> BuildConfig<'long> {
         let cargo_home = if let Ok(cargo_home) = env::var("CARGO_HOME") {
             cargo_home
         } else {
-            env::var("HOME").map_err(|_| format!("Fatal, cannot fetch cargo home"))? + "/.cargo"
+            env::var("HOME")
+                .map_err(|_| AuditError::Unexpected(format!("cannot fetch cargo home")))?
+                + "/.cargo"
         };
 
         let crates_cfgs = HashMap::default();
@@ -58,6 +65,9 @@ impl<'short, 'long: 'short> BuildConfig<'long> {
             rust_version: 63,
             cargo_args: None,
             crates_cfgs,
+
+            newer_fix: false,
+            quick_fix: false,
         })
     }
 
@@ -74,7 +84,7 @@ impl<'short, 'long: 'short> BuildConfig<'long> {
     }
 
     /// Filter used rufs in current configurations
-    pub fn filter_rufs(&self, crate_name: &str, rufs: CondRufs) -> Result<UsedRufs, String> {
+    pub fn filter_rufs(&self, crate_name: &str, rufs: CondRufs) -> Result<UsedRufs, AuditError> {
         // let tmp_rsfile_path = self.get_tmp_rsfile();
         let mut content = String::new();
         let mut used_rufs = UsedRufs::empty();
@@ -126,10 +136,10 @@ impl<'short, 'long: 'short> BuildConfig<'long> {
                 .expect("Fatal, cannot fetch scanner output");
 
             if !output.status.success() {
-                return Err(format!(
-                    "Fatal, cannot check candidate rufs: {}",
+                return Err(AuditError::Unexpected(format!(
+                    "cannot check candidate rufs: {}",
                     String::from_utf8_lossy(&output.stderr)
-                ));
+                )));
             }
 
             let stdout = String::from_utf8_lossy(&output.stdout);
@@ -185,6 +195,26 @@ impl<'short, 'long: 'short> BuildConfig<'long> {
 
     pub fn get_cargo_args(&'long self) -> Option<&'short [String]> {
         self.cargo_args
+    }
+
+    #[inline]
+    pub fn set_newer_fix(&mut self, newer_fix: bool) {
+        self.newer_fix = newer_fix
+    }
+
+    #[inline]
+    pub fn is_newer_fix(&self) -> bool {
+        self.newer_fix
+    }
+
+    #[inline]
+    pub fn set_quick_fix(&mut self, quick_fix: bool) {
+        self.quick_fix = quick_fix
+    }
+
+    #[inline]
+    pub fn is_quick_fix(&self) -> bool {
+        self.quick_fix
     }
 }
 

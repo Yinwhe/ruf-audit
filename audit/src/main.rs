@@ -15,8 +15,7 @@ use extract::extract;
 mod audit;
 use audit::audit;
 
-// mod utils;
-// use utils::cargo_wrapper;
+mod error;
 
 mod build_config;
 use build_config::BuildConfig;
@@ -31,7 +30,7 @@ lazy_static! {
     pub static ref BOLD_YELLOW: Style = Style::new().bold().fg(Color::Yellow);
     pub static ref BOLD_GREEN: Style = Style::new().bold().fg(Color::Green);
     pub static ref LOGGER: Logger = {
-        let file_logger = FileLoggerBuilder::new("/home/ubuntu/Workspaces/ruf-audit/debug.log")
+        let file_logger = FileLoggerBuilder::new("./debug.log")
             .level(sloggers::types::Severity::Warning)
             .build()
             .expect("Fatal, build logger fails");
@@ -65,7 +64,7 @@ fn main() {
             // And here we do the scan operation
             debug!(LOGGER, "Use audit, pass by pipe");
             // We need to collect build configs.
-            
+
             scanner()
                 .args(["--checkinfo", "--rustc", &args[1], "--"])
                 .args(&args[2..])
@@ -90,6 +89,7 @@ fn main() {
     let mut opts = Options::new();
     opts.optflag("h", "help", "Print help information");
     opts.optflag("", "extract", "extract rufs used in current configurations");
+    opts.optflag("", "quick-fix", "fix with rustc and minimal dep tree");
 
     let matches = match opts.parse(my_args) {
         Ok(m) => m,
@@ -116,6 +116,10 @@ fn main() {
         }
 
         exit(0);
+    }
+
+    if matches.opt_present("quick-fix") {
+        config.set_quick_fix(true);
     }
 
     // default we do ruf audit

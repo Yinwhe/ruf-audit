@@ -1,12 +1,14 @@
 use basic_usages::external::fxhash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use basic_usages::ruf_check_info::UsedRufs;
 
+use cargo_lock::dependency::graph::NodeIndex;
 use petgraph::visit::{self};
 
 use crate::build_config::BuildConfig;
 use crate::dep_manager::DepManager;
+use crate::error::AuditError;
 use crate::extract::extract;
-use crate::{error_print, info_print, warn_print};
+use crate::{cargo, error_print, info_print, warn_print};
 
 // lazy_static! {
 //     static ref DEPMANAGER: Mutex<MaybeUninit<DepManager>> = Mutex::new(MaybeUninit::uninit());
@@ -20,7 +22,7 @@ pub fn audit(mut config: BuildConfig) -> i32 {
     let used_rufs = match extract(&mut config) {
         Ok(used_rufs) => used_rufs,
         Err(err) => {
-            error_print(&err);
+            error_print(&format!("extract used rufs fail: {err}"));
             return -1;
         }
     };
@@ -28,7 +30,7 @@ pub fn audit(mut config: BuildConfig) -> i32 {
 
     // We fetch the used features, and then we shall check it
     if let Err(err) = check_rufs(config, used_rufs) {
-        error_print(&err);
+        error_print(&format!("we cannot fix rufs issue: {err}"));
         return -1;
     }
 
@@ -36,7 +38,10 @@ pub fn audit(mut config: BuildConfig) -> i32 {
     return 0;
 }
 
-fn check_rufs(mut config: BuildConfig, used_rufs: HashMap<String, UsedRufs>) -> Result<(), String> {
+fn check_rufs(
+    mut config: BuildConfig,
+    used_rufs: HashMap<String, UsedRufs>,
+) -> Result<(), AuditError> {
     info_print("Starting", "analyzing used rufs");
 
     let mut dm = DepManager::new()?;
@@ -64,18 +69,24 @@ fn check_rufs(mut config: BuildConfig, used_rufs: HashMap<String, UsedRufs>) -> 
     }
 
     // or we have to things to fix.
-    let err = match fix_with_dep(&mut config, used_rufs, &mut dm) {
-        Ok(()) => {
-            info_print(
-                "\tFixed",
-                "all ruf issues are fixed, usable depenency tree are written in `Cargo.lock`",
-            );
-            return Ok(());
-        }
-        Err(e) => e,
-    };
+    if !config.is_quick_fix() {
+        // if not quick fix, we will do this, since dep tree fix can be hard and slow
+        let err = match fix_with_dep(&mut config, used_rufs, &mut dm) {
+            Ok(()) => {
+                info_print(
+                    "\tFixed",
+                    "all ruf issues are fixed, usable depenency tree are written in `Cargo.lock`",
+                );
+                return Ok(());
+            }
+            Err(e) => e,
+        };
 
-    warn_print("\tFailed",&format!("we cannot fix ruf issues through changing dep tree, we try changing rustc with proper dep trees:\n\t{err}"));
+        warn_print(
+            "\tFailed",
+            &format!("we cannot fix ruf issues through changing dep tree: {err}"),
+        );
+    }
 
     let err = match fix_with_rustc(&mut config, &mut dm) {
         Ok(rustc_version) => {
@@ -88,14 +99,14 @@ fn check_rufs(mut config: BuildConfig, used_rufs: HashMap<String, UsedRufs>) -> 
         Err(e) => e,
     };
 
-    return Err(format!("we cannot fix ruf issues in this crate, you may change direclty used depenedencies and their versions to fix it:\n\t{err}"));
+    return Err(err);
 }
 
 fn fix_with_dep(
     config: &mut BuildConfig,
     mut used_rufs: HashMap<String, UsedRufs>,
     dm: &mut DepManager,
-) -> Result<(), String> {
+) -> Result<(), AuditError> {
     // this algo will ends, because we have a finite number of crates
     // and each time we slim down the candidates.
     loop {
@@ -106,14 +117,12 @@ fn fix_with_dep(
         let mut bfs = visit::Bfs::new(&graph, root);
         while let Some(nx) = bfs.next(&graph) {
             let node = &graph[nx];
-            let rufs = used_rufs.get(node.name.as_str()).expect(&format!(
-                "Fatal, cannot fetch used rufs for crate {}",
-                node.name
-            ));
-
-            if !config.rufs_usable(&rufs) {
-                issued_depnx = Some(nx);
-                break;
+            // though we record all used crates, `Cargo.lock` seems to record optional deps too.
+            if let Some(rufs) = used_rufs.get(node.name.as_str()) {
+                if !config.rufs_usable(&rufs) {
+                    issued_depnx = Some(nx);
+                    break;
+                }
             }
         }
 
@@ -127,7 +136,7 @@ fn fix_with_dep(
         let issued_dep = &graph[issued_depnx];
 
         warn_print(
-            "\tIssue",
+            "\tDetecting",
             &format!("dep '{}' cause ruf issues", issued_dep.name),
         );
 
@@ -144,58 +153,162 @@ fn fix_with_dep(
             }
         }
 
-        // TODO: Currentlt we use a simple way to fix, choose the min version and no up fix
-        if let Some(min_ver) = usable_vers.into_iter().min() {
-            info_print("\tFixing", &format!("changing to version {}", min_ver));
+        // donw fix first
+        let choose = if config.is_newer_fix() {
+            usable_vers.into_iter().max()
+        } else {
+            usable_vers.into_iter().min()
+        };
+        if let Some(ver) = choose {
+            info_print("\tFixing", &format!("changing to version {}", ver));
             // Here previous graph and issue_dep are droped, we have to copy rather than borrow.
             dm.update_pkg(
                 &issued_dep.name.to_string(),
                 &issued_dep.version.to_string(),
-                min_ver.to_string().as_str(),
+                ver.to_string().as_str(),
             )?;
 
             info_print("\tFixing", "rechecking ruf issues");
             used_rufs = extract(config)?;
         } else {
-            // No usable version, cannot fixed through change dep tree.
-            return Err(format!(
-                "cannot find usable version for crate '{}' in current configurations",
-                issued_dep.name
-            ));
+            // No usable version, maybe parents' version not compatible, we do up fix.
+            match up_fix(config, issued_depnx, dm) {
+                Ok(_) => {
+                    info_print("\tUpfixing", "rechecking ruf issues");
+                    used_rufs = extract(config)?;
+                }
+                Err(e) => {
+                    if !e.is_unexpected() {
+                        // TODO: Print fail paths
+                        return Err(AuditError::Functionality(format!("up fix fails")));
+                    }
+                    return Err(e);
+                }
+            }
         }
     }
 }
 
-fn fix_with_rustc(config: &mut BuildConfig, dm: &mut DepManager) -> Result<u32, String> {
-    // we restore the dep tree to its release configurations, which is, all oldest.
+fn up_fix(
+    config: &mut BuildConfig,
+    issued_depnx: NodeIndex,
+    dm: &mut DepManager,
+) -> Result<(), AuditError> {
+    // check which parent shall be updated.
+    let p_reqs = match dm.req_by(&issued_depnx) {
+        Some(reqs) => reqs,
+        None => {
+            // already root crates, up fix fails
+            return Err(AuditError::Functionality(format!(
+                "up fix failed, reaching root"
+            )));
+        }
+    };
 
-    loop {
-        let graph = dm.graph();
-        let root = dm.root();
-        let mut update = None;
+    let mut fix_one = false;
 
-        let mut bfs = visit::Bfs::new(&graph, root);
-        while let Some(nx) = bfs.next(&graph) {
-            let candidates = dm.get_candidates(nx)?;
-            if !candidates.is_empty() {
-                let oldest = candidates.into_iter().map(|cad| cad.0).min().unwrap();
-                update = Some((nx, oldest));
+    assert!(p_reqs.len() > 0, "no depdents found");
+    for p in &p_reqs {
+        let pkg = &dm.graph()[p.to_owned()];
+        let p_candidates_vers = dm.get_candidates_up_fix(p.clone(), issued_depnx.clone())?;
+
+        let mut usable_vers = vec![];
+        for cad in p_candidates_vers {
+            let used_rufs = config.filter_rufs(pkg.name.as_str(), cad.1)?;
+            if config.rufs_usable(&used_rufs) {
+                usable_vers.push(cad.0);
             }
         }
 
-        if let Some(update) = update {
-            let pkg_name = &graph[update.0].name.to_string();
-            let pkg_ver = &graph[update.0].version.to_string();
-            // graph drops here
-            dm.update_pkg(
-                pkg_name.as_str(),
-                pkg_ver.to_string().as_str(),
-                update.1.to_string().as_str(),
-            )?;
+        let choose = if config.is_newer_fix() {
+            usable_vers.into_iter().max()
         } else {
+            usable_vers.into_iter().min()
+        };
+        if let Some(ver) = choose {
+            info_print("\tUpfixing", &format!("changing to version {}", ver));
+            // Here previous graph and issue_dep are droped, we have to copy rather than borrow.
+            dm.update_pkg(
+                &pkg.name.to_string(),
+                &pkg.version.to_string(),
+                ver.to_string().as_str(),
+            )?;
+            fix_one = true;
             break;
         }
+        // dependent cannot be fixed too, check next p first, if exists
     }
+
+    if fix_one {
+        // make sure each time we are making progress
+        return Ok(());
+    }
+
+    // or, maybe we have to nested upfix
+    for p in p_reqs {
+        match up_fix(config, p, dm) {
+            Ok(_) => {
+                fix_one = true;
+                break;
+            }
+            Err(e) => {
+                if e.is_unexpected() {
+                    return Err(e);
+                }
+            }
+        }
+    }
+
+    if !fix_one {
+        // up fix fails
+        return Err(AuditError::Functionality(format!(
+            "up fix fails at current layer"
+        )));
+    }
+
+    Ok(())
+}
+
+fn fix_with_rustc(config: &mut BuildConfig, _dm: &mut DepManager) -> Result<u32, AuditError> {
+    // we restore the dep tree to its release configurations, which is, all oldest.
+    let mut cargo = cargo();
+    cargo.args(["generate-lockfile", "-Z", "minimal-versions"]);
+    let output = cargo
+        .output()
+        .map_err(|e| AuditError::Unexpected(format!("cannot run cargo generate-lockfile: {e}")))?;
+
+    if !output.status.success() {
+        return Err(AuditError::Unexpected(format!(
+            "failed to minimal generate-lock"
+        )));
+    }
+    // loop {
+    //     let graph = dm.graph();
+    //     let root = dm.root();
+    //     let mut update = None;
+
+    //     let mut bfs = visit::Bfs::new(&graph, root);
+    //     while let Some(nx) = bfs.next(&graph) {
+    //         let candidates = dm.get_candidates(nx)?;
+    //         if !candidates.is_empty() {
+    //             let oldest = candidates.into_iter().map(|cad| cad.0).min().unwrap();
+    //             update = Some((nx, oldest));
+    //         }
+    //     }
+
+    //     if let Some(update) = update {
+    //         let pkg_name = &graph[update.0].name.to_string();
+    //         let pkg_ver = &graph[update.0].version.to_string();
+    //         // graph drops here
+    //         dm.update_pkg(
+    //             pkg_name.as_str(),
+    //             pkg_ver.to_string().as_str(),
+    //             update.1.to_string().as_str(),
+    //         )?;
+    //     } else {
+    //         break;
+    //     }
+    // }
 
     // recheck all used rufs
     let used_rufs = extract(config)?;
@@ -206,9 +319,9 @@ fn fix_with_rustc(config: &mut BuildConfig, dm: &mut DepManager) -> Result<u32, 
             let rustc_versions = config.usable_rustc_for_ruf(&ruf);
             // println!("[Debug] usble rustc for {ruf}: {rustc_versions:?}");
             if rustc_versions.is_empty() {
-                return Err(
+                return Err(AuditError::Functionality(
                     "cannot find usable rustc version for current configurations".to_string(),
-                );
+                ));
             }
             usable_rustc = usable_rustc
                 .intersection(&rustc_versions)
@@ -217,9 +330,9 @@ fn fix_with_rustc(config: &mut BuildConfig, dm: &mut DepManager) -> Result<u32, 
         }
     }
 
-    usable_rustc
-        .iter()
-        .max()
-        .cloned()
-        .ok_or_else(|| "cannot find usable rustc version for current configurations".to_string())
+    usable_rustc.iter().max().cloned().ok_or_else(|| {
+        AuditError::Functionality(
+            "cannot find usable rustc version for current configurations".to_string(),
+        )
+    })
 }

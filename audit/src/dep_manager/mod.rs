@@ -1,7 +1,9 @@
+use std::cell::RefCell;
+
 use basic_usages::external::fxhash::FxHashMap as HashMap;
 
 use cargo_lock::dependency::Tree;
-// use cargo_lock::Lockfile;
+use cargo_lock::dependency::graph::NodeIndex;
 use cargo_metadata::semver::VersionReq;
 use tame_index::index::RemoteSparseIndex;
 use tame_index::utils::flock::LockOptions;
@@ -13,6 +15,9 @@ pub struct DepManager<'long> {
     index: RemoteSparseIndex,
     lock: LockOptions<'long>,
 
+    // updates each fresh
     dep_tree: Tree,
+    req_by: RefCell<HashMap<NodeIndex, Vec<NodeIndex>>>,
+
     local_crates: HashMap<String, Vec<(String, VersionReq)>>,
 }

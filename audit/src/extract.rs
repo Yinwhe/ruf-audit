@@ -6,25 +6,27 @@ use basic_usages::external::fxhash::{FxHashMap as HashMap, FxHashSet as HashSet}
 use basic_usages::ruf_check_info::{CheckInfo, UsedRufs};
 
 use crate::build_config::BuildConfig;
+use crate::error::AuditError;
 // use crate::{LOGGER, error_print, info_print};
 use crate::{cargo, RE_CHECKINFO};
 
 pub fn extract(
     config: &mut BuildConfig,
     // recheck: bool,
-) -> Result<HashMap<String, UsedRufs>, String> {
+) -> Result<HashMap<String, UsedRufs>, AuditError> {
     let mut cargo = cargo();
     cargo.arg("rustc");
     if let Some(cargo_args) = config.get_cargo_args() {
         cargo.args(cargo_args);
     }
 
-    let path = current_exe().map_err(|_| format!("cannot get current exe path"))?;
+    let path = current_exe()
+        .map_err(|_| AuditError::Unexpected(format!("cannot get current exe path")))?;
     cargo.env("RUSTC_WRAPPER", &path);
 
     let cargo = cargo
         .output()
-        .map_err(|e| format!("cannot spawn cargo process: {e}"))?;
+        .map_err(|e| AuditError::Unexpected(format!("cannot spawn cargo process: {e}")))?;
 
     if !cargo.status.success() {
         let stderr = String::from_utf8_lossy(&cargo.stderr);
@@ -33,10 +35,10 @@ pub fn extract(
             .into_iter()
             .find(|line| line.trim().starts_with("error"));
 
-        return Err(format!(
+        return Err(AuditError::Unexpected(format!(
             "cargo process run fails: {err:?}",
             err = err.unwrap_or(&"unknown error")
-        ));
+        )));
     }
 
     let stdout = String::from_utf8_lossy(&cargo.stdout);
