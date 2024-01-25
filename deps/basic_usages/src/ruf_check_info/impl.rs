@@ -22,6 +22,7 @@ impl UsedRufs {
     pub fn iter(&self) -> std::slice::Iter<'_, String> {
         self.0.iter()
     }
+
 }
 
 impl CondRufs {

@@ -4,7 +4,7 @@ use std::process::{Command, Stdio};
 
 use basic_usages::external::fxhash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use basic_usages::ruf_check_info::{CondRufs, UsedRufs};
-use basic_usages::ruf_lifetime::{get_ruf_all_status, get_ruf_status};
+use basic_usages::ruf_lifetime::{get_ruf_all_status, get_ruf_status, RUSTC_VER_NUM};
 
 use super::BuildConfig;
 use crate::error::AuditError;
@@ -69,6 +69,7 @@ impl<'short, 'long: 'short> BuildConfig<'long> {
             newer_fix: false,
             quick_fix: false,
             verbose: false,
+            test: false,
         })
     }
 
@@ -169,13 +170,20 @@ impl<'short, 'long: 'short> BuildConfig<'long> {
         return true;
     }
 
-    pub fn usable_rustc_for_ruf(&self, ruf: &str) -> HashSet<u32> {
-        get_ruf_all_status(ruf)
-            .into_iter()
-            .enumerate()
-            .filter(|(_, status)| status.is_usable())
-            .map(|(ver, _)| ver as u32)
-            .collect()
+    /// Get usable rustc versions for rufs
+    pub fn usable_rustc_for_rufs(&self, rufs: &UsedRufs) -> HashSet<u32> {
+        let mut usable_rustc = HashSet::from_iter(0..RUSTC_VER_NUM as u32);
+        for ruf in rufs.iter() {
+            let ur = get_ruf_all_status(ruf)
+                .into_iter()
+                .enumerate()
+                .filter(|(_, status)| status.is_usable())
+                .map(|(ver, _)| ver as u32)
+                .collect();
+            usable_rustc = usable_rustc.intersection(&ur).cloned().collect();
+        }
+
+        usable_rustc
     }
 
     pub fn get_rustlib_path(&self) -> String {
@@ -226,6 +234,16 @@ impl<'short, 'long: 'short> BuildConfig<'long> {
     #[inline]
     pub fn is_verbose(&self) -> bool {
         self.verbose
+    }
+
+    #[inline]
+    pub fn set_test(&mut self, test: bool) {
+        self.test = test
+    }
+
+    #[inline]
+    pub fn is_test(&self) -> bool {
+        self.test
     }
 }
 

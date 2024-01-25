@@ -15,7 +15,7 @@ mod extract;
 use extract::extract;
 
 mod audit;
-use audit::audit;
+use audit::{audit, test};
 
 mod error;
 
@@ -47,13 +47,12 @@ fn main() {
     let mut config = match BuildConfig::default() {
         Ok(config) => config,
         Err(e) => {
-            error_print(&format!("{e}"));
+            error_print!(false, &format!("{e}"));
             exit(-1);
         }
     };
 
     let args: Vec<String> = env::args().collect();
-
     // info!(LOGGER, "startup command line: {:?}", &args);
 
     // cargo wrapper usage, act as scanner.
@@ -75,7 +74,6 @@ fn main() {
 
             // And here we do the scan operation, after scan we launch real rustc,
             // this is essential, since some crates has build scripts or things like that.
-
             // Besides, we gain incremental check from cargo for launching real rustc, which is good
             // for later repeated extract process.
             scanner()
@@ -113,11 +111,12 @@ fn main() {
         "Fix by changing rustc and using oldest dep tree",
     );
     opts.optflag("", "verbose", "Print audit detail info");
+    opts.optflag("", "test", "Only used for test purpose");
 
     let matches = match opts.parse(my_args) {
         Ok(m) => m,
         Err(e) => {
-            error_print(&format!("parse cli args fails: {e}"));
+            error_print!(false, &format!("parse cli args fails: {e}"));
             exit(-1);
         }
     };
@@ -128,7 +127,7 @@ fn main() {
     }
 
     if matches.opt_present("extract") {
-        match extract(&mut config) {
+        match extract(&mut config, false) {
             Ok(used_rufs) => {
                 // TODO: Pretty print
                 println!("{used_rufs:?}");
@@ -153,10 +152,16 @@ fn main() {
         config.set_verbose(true);
     }
 
+    if matches.opt_present("test") {
+        config.set_test(true);
+        let exit_code = test(config);
+        exit(exit_code);
+    }
+
     // warn!(LOGGER, "Exec audit, this function shall be exec only once globally!");
 
     // default we do ruf audit
-    let exit_code = audit(config);
+    let exit_code = audit(config, false);
     exit(exit_code);
 }
 
@@ -181,14 +186,29 @@ fn rustc() -> Command {
     cmd
 }
 
-fn info_print(title: &str, msg: &str) {
-    println!("{} {}", BOLD_GREEN.paint(title), msg);
+#[macro_export]
+macro_rules! info_print {
+    ($quiet:expr, $title:expr, $msg:expr) => {
+        if !$quiet {
+            println!("{} {}", $crate::BOLD_GREEN.paint($title), $msg);
+        }
+    };
 }
 
-fn warn_print(title: &str, msg: &str) {
-    println!("{} {}", BOLD_YELLOW.paint(title), msg);
+#[macro_export]
+macro_rules! warn_print {
+    ($quiet:expr, $title:expr, $msg:expr) => {
+        if !$quiet {
+            println!("{} {}", $crate::BOLD_YELLOW.paint($title), $msg);
+        }
+    };
 }
 
-fn error_print(msg: &str) {
-    println!("{} {}", BOLD_RED.paint("error"), msg);
+#[macro_export]
+macro_rules! error_print {
+    ($quiet:expr, $msg:expr) => {
+        if !$quiet {
+            println!("{} {}", $crate::BOLD_RED.paint("error"), $msg);
+        }
+    };
 }

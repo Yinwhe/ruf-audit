@@ -18,11 +18,13 @@ pub struct BuildConfig<'c> {
     // dep crate build cfgs
     crates_cfgs: HashMap<String, HashSet<String>>,
 
-    // user configs
     // each fix we choose newer one or older one (default)
     newer_fix: bool,
     // fix with rustc and minimal dep tree, which is the quickest way (default false)
     quick_fix: bool,
     // print check details
     verbose: bool,
+    // test mode, not provided to user
+    test: bool,
+
 }
