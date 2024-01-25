@@ -438,6 +438,7 @@ pub fn test(mut config: BuildConfig) -> i32 {
     }
     result.3 = false;
 
+    info_print!(false, "Failed", "cannot fix ruf issues");
     show_result(result);
-    return 0;
+    return -2;
 }
