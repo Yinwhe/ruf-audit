@@ -124,7 +124,7 @@ pub fn extract(
 
         // We may not stop here, keeps on going and just print errors, 
         // since we only cares ruf usage, rather than syntax error or things like that.
-        warn_print("Buiding Issues", &format!("extraction incomplete, mostly due to syntax fatal errors (you can check details with cargo), but we will keep on going: {err}"));
+        warn_print("Buiding issues", &format!("extraction incomplete, mostly due to syntax fatal errors (you can check details with cargo), but we will keep on going: {err}"));
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
