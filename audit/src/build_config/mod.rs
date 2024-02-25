@@ -11,7 +11,7 @@ pub struct BuildConfig<'c> {
     // cargo home
     #[allow(unused)]
     cargo_home: String,
-    // current enabled rustc version
+    // current tested rust version, and the original used one.
     rust_version: u32,
     ori_rust_version: u32,
     

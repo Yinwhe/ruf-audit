@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 dep1 = { path = "../dep1"}
 dep2 = { path = "../dep2"}
+midi = "=0.0.2"

@@ -267,10 +267,10 @@ impl<'short, 'long: 'short> BuildConfig<'long> {
         self.test = test
     }
 
-    #[inline]
-    pub fn is_test(&self) -> bool {
-        self.test
-    }
+    // #[inline]
+    // pub fn is_test(&self) -> bool {
+    //     self.test
+    // }
 }
 
 // #[test]

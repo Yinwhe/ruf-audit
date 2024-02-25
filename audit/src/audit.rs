@@ -371,12 +371,14 @@ pub fn test(mut config: BuildConfig) -> i32 {
 
     if used_rufs.iter().all(|(_, rufs)| config.rufs_usable(rufs)) {
         if let Some(err) = check_status(&config) {
-            info_print!(false, "Test 1", &format!("not ok, {err}"));
+            warn_print!(false, "Test 1", &format!("check not ok, {err}"));
         } else {
-            info_print!(false, "Test 1", "ruf usage ok");
+            warn_print!(false, "Test 1", "ruf usage ok");
             show_result(result);
             return 0;
         }
+    } else {
+        warn_print!(false, "Test 1", "ruf not ok");
     }
     result.0 = false;
 
@@ -392,12 +394,14 @@ pub fn test(mut config: BuildConfig) -> i32 {
         config.update_rust_version(max);
 
         if let Some(err) = check_status(&config) {
-            info_print!(false, "Test 2", &format!("not ok, {err}"));
+            warn_print!(false, "Test 2", &format!("check not ok, {err}"));
         } else {
-            info_print!(false, "Test 2", &format!("rustc fix: {:?}", max));
+            warn_print!(false, "Test 2", &format!("rustc fix: {:?}", max));
             show_result(result);
             return 0;
         }
+    } else {
+        warn_print!(false, "Test 2", "no usable rustc");
     }
     result.1 = false;
     config.restore_rust_version();
@@ -423,12 +427,14 @@ pub fn test(mut config: BuildConfig) -> i32 {
 
     if used_rufs.iter().all(|(_, rufs)| config.rufs_usable(rufs)) {
         if let Some(err) = check_status(&config) {
-            info_print!(false, "Test 3", &format!("not ok, {err}"));
+            warn_print!(false, "Test 3", &format!("check not ok, {err}"));
         } else {
-            info_print!(false, "Test 3", "ruf usage ok");
+            warn_print!(false, "Test 3", "ruf usage ok");
             show_result(result);
             return 0;
         }
+    } else {
+        warn_print!(false, "Test 3", "ruf not ok");
     }
     result.2 = false;
 
@@ -444,16 +450,18 @@ pub fn test(mut config: BuildConfig) -> i32 {
         config.update_rust_version(max);
 
         if let Some(err) = check_status(&config) {
-            info_print!(false, "Test 4", &format!("not ok, {err}"));
+            warn_print!(false, "Test 4", &format!("check not ok, {err}"));
         } else {
-            info_print!(false, "Test 4", &format!("rustc fix: {:?}", max));
+            warn_print!(false, "Test 4", &format!("rustc fix: {:?}", max));
             show_result(result);
             return 0;
         }
+    } else {
+        warn_print!(false, "Test 4", "no usable rustc");
     }
     result.3 = false;
 
-    info_print!(false, "Failed", "cannot fix ruf issues");
+    error_print!(false, "cannot fix ruf issues");
     show_result(result);
 
     return -2;
