@@ -17,6 +17,7 @@ fn get_nightly_versions_raw() -> FxHashMap<u32, &'static str> {
     // Notice: this rust version and dates are based on our test machine:
     // Linux ubuntu-7070 6.5.0-18-generic #18~22.04.1-Ubuntu SMP PREEMPT_DYNAMIC Wed Feb  7 11:40:03 UTC 2 x86_64 x86_64 x86_64 GNU/Linux
     let mut versions = FxHashMap::default();
+    versions.insert(0, "nightly-2015-04-20");
     versions.insert(1, "nightly-2015-05-16");
     versions.insert(2, "nightly-2015-05-28");
     versions.insert(3, "nightly-2015-06-26");
@@ -93,8 +94,8 @@ fn get_nightly_versions_raw() -> FxHashMap<u32, &'static str> {
 
 #[allow(unused)]
 fn install_toolchains() {
-    for i in (1..=63).rev() {
-        let name = format!("nightly-{}", get_nightly_version(i));
+    for i in (0..=63).rev() {
+        let name =  get_nightly_version(i);
 
         let mut cmd = std::process::Command::new("rustup");
         cmd.args(["toolchain", "install", &name, "--profile", "minimal"]);
