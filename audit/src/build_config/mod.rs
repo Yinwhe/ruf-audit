@@ -9,9 +9,11 @@ pub struct BuildConfig<'c> {
     // rustup home
     rustup_home: String,
     // cargo home
+    #[allow(unused)]
     cargo_home: String,
     // current enabled rustc version
     rust_version: u32,
+    ori_rust_version: u32,
     
     // cargo args when checking
     cargo_args: Option<&'c [String]>,

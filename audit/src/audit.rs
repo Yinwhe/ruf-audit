@@ -8,7 +8,7 @@ use crate::build_config::BuildConfig;
 use crate::dep_manager::DepManager;
 use crate::error::AuditError;
 use crate::extract::extract;
-use crate::{cargo, error_print, info_print, warn_print};
+use crate::{error_print, info_print, spec_cargo, warn_print, RUSTV};
 
 /// The main audit functions,
 /// this function shall be called only once, at first layer.
@@ -31,7 +31,7 @@ pub fn audit(mut config: BuildConfig, queit: bool) -> i32 {
     // We fetch the used features, and then we shall check it
     if let Err(err) = check_rufs(config, used_rufs, queit) {
         error_print!(queit, &format!("we cannot fix rufs issue: {err}"));
-        return -1;
+        return err.exit_code();
     }
 
     info_print!(queit, "Finished", "currently no rufs issue found");
@@ -286,7 +286,7 @@ fn fix_with_rustc(
     queit: bool,
 ) -> Result<u32, AuditError> {
     // we restore the dep tree to its release configurations, which is, all oldest.
-    let mut cargo = cargo();
+    let mut cargo: std::process::Command = spec_cargo(RUSTV);
     cargo.args(["generate-lockfile", "-Z", "minimal-versions"]);
     let output = cargo
         .output()
@@ -364,15 +364,19 @@ pub fn test(mut config: BuildConfig) -> i32 {
     let used_rufs = match extract(&mut config, true) {
         Ok(used_rufs) => used_rufs,
         Err(err) => {
-            error_print!(false, &format!("extract used rufs fail: {err}"));
+            error_print!(false, &format!("extract rufs fail: {err}"));
             return -1;
         }
     };
 
     if used_rufs.iter().all(|(_, rufs)| config.rufs_usable(rufs)) {
-        info_print!(false, "Test 1", "ruf usage ok");
-        show_result(result);
-        return 0;
+        if let Some(err) = check_status(&config) {
+            info_print!(false, "Test 1", &format!("not ok, {err}"));
+        } else {
+            info_print!(false, "Test 1", "ruf usage ok");
+            show_result(result);
+            return 0;
+        }
     }
     result.0 = false;
 
@@ -384,18 +388,22 @@ pub fn test(mut config: BuildConfig) -> i32 {
     }
 
     if !usable_rustc.is_empty() {
-        info_print!(
-            false,
-            "Test 2",
-            &format!("rustc fix: {:?}", usable_rustc.into_iter().max())
-        );
-        show_result(result);
-        return 0;
+        let max = usable_rustc.iter().max().cloned().unwrap();
+        config.update_rust_version(max);
+
+        if let Some(err) = check_status(&config) {
+            info_print!(false, "Test 2", &format!("not ok, {err}"));
+        } else {
+            info_print!(false, "Test 2", &format!("rustc fix: {:?}", max));
+            show_result(result);
+            return 0;
+        }
     }
     result.1 = false;
+    config.restore_rust_version();
 
     info_print!(false, "Test 3", "no rustc fix, only min dep tree");
-    let mut cargo = cargo();
+    let mut cargo = spec_cargo(RUSTV);
     cargo.args(["generate-lockfile", "-Z", "minimal-versions"]);
     if matches!(
         cargo.output().map(|output| output.status.success()),
@@ -414,9 +422,13 @@ pub fn test(mut config: BuildConfig) -> i32 {
     };
 
     if used_rufs.iter().all(|(_, rufs)| config.rufs_usable(rufs)) {
-        info_print!(false, "Test 3", "ruf usage ok");
-        show_result(result);
-        return 0;
+        if let Some(err) = check_status(&config) {
+            info_print!(false, "Test 3", &format!("not ok, {err}"));
+        } else {
+            info_print!(false, "Test 3", "ruf usage ok");
+            show_result(result);
+            return 0;
+        }
     }
     result.2 = false;
 
@@ -428,17 +440,48 @@ pub fn test(mut config: BuildConfig) -> i32 {
     }
 
     if !usable_rustc.is_empty() {
-        info_print!(
-            false,
-            "Test 4",
-            &format!("rustc fix: {:?}", usable_rustc.into_iter().max())
-        );
-        show_result(result);
-        return 0;
+        let max = usable_rustc.iter().max().cloned().unwrap();
+        config.update_rust_version(max);
+
+        if let Some(err) = check_status(&config) {
+            info_print!(false, "Test 4", &format!("not ok, {err}"));
+        } else {
+            info_print!(false, "Test 4", &format!("rustc fix: {:?}", max));
+            show_result(result);
+            return 0;
+        }
     }
     result.3 = false;
 
     info_print!(false, "Failed", "cannot fix ruf issues");
     show_result(result);
+
     return -2;
+}
+
+fn check_status(config: &BuildConfig) -> Option<String> {
+    let mut cargo = spec_cargo(config.get_rustc_spec());
+    cargo.arg("check");
+    if let Some(cargo_args) = config.get_cargo_args() {
+        cargo.args(cargo_args);
+    }
+
+    let output = match cargo.output() {
+        Ok(o) => o,
+        Err(e) => return Some(format!("{e}")),
+    };
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+
+        let err = stderr
+            .lines()
+            .into_iter()
+            .find(|line| line.trim_start().starts_with("error"))
+            .unwrap_or("unknown error");
+
+        return Some(err.to_string());
+    }
+
+    None
 }

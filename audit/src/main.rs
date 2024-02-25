@@ -28,12 +28,13 @@ mod dep_manager;
 lazy_static! {
     pub static ref RE_USEDFEATS: Regex = Regex::new(r"FDelimiter::\{(.*?)\}::FDelimiter").unwrap();
     pub static ref RE_CHECKINFO: Regex = Regex::new(r"CDelimiter::\{(.*?)\}::CDelimiter").unwrap();
+    pub static ref RE_RUSTC_VRESION: Regex = Regex::new(r"rustc\s+1\.(\d+)\.\d+-nightly").unwrap();
     pub static ref BOLD_RED: Style = Style::new().bold().fg(Color::Red);
     pub static ref BOLD_YELLOW: Style = Style::new().bold().fg(Color::Yellow);
     pub static ref BOLD_GREEN: Style = Style::new().bold().fg(Color::Green);
     pub static ref LOGGER: Logger = {
         let file_logger = FileLoggerBuilder::new("./debug.log")
-            .level(sloggers::types::Severity::Warning)
+            .level(sloggers::types::Severity::Debug)
             .build()
             .expect("Fatal, build logger fails");
 
@@ -41,6 +42,8 @@ lazy_static! {
         Logger::root(async_drain, o!())
     };
 }
+
+const RUSTV: &str = "nightly-2023-12-12";
 
 fn main() {
     // Get current config first
@@ -62,13 +65,12 @@ fn main() {
         // We use original rustc to do some information fetch
         let status = if args[2] == "-" {
             // debug!(LOGGER, "Use rustc, inherit std");
-            rustc()
+            spec_rustc(RUSTV)
                 .args(&args[2..])
                 .spawn()
                 .expect("Fatal, cannot run rustc")
-                .wait_with_output()
+                .wait()
                 .expect("Fatal, cannot fetch rustc output")
-                .status
         } else {
             // debug!(LOGGER, "Use audit, pass by pipe");
 
@@ -82,11 +84,11 @@ fn main() {
                 .env("LD_LIBRARY_PATH", config.get_rustlib_path())
                 .spawn()
                 .expect("Fatal, cannot run scanner")
-                .wait_with_output()
+                .wait()
                 .expect("Fatal, cannot fetch scanner output")
-                .status
         };
 
+        // debug!(LOGGER, "scanner exit");
         exit(status.code().unwrap_or(-1))
     }
 
@@ -127,14 +129,17 @@ fn main() {
     }
 
     if matches.opt_present("extract") {
+        info_print!(
+            false,
+            "Starting",
+            "extract rufs used in current configurations"
+        );
+        // TODO: extract functionality
         match extract(&mut config, false) {
             Ok(used_rufs) => {
-                // TODO: Pretty print
-                println!("{used_rufs:?}");
+                println!("extract success: {used_rufs:?}");
             }
-            Err(_e) => {
-                unimplemented!()
-            }
+            Err(_e) => {}
         }
 
         exit(0);
@@ -167,21 +172,21 @@ fn main() {
 
 fn scanner() -> Command {
     let mut cmd = Command::new("ruf_scanner");
-    cmd.env("RUSTUP_TOOLCHAIN", "nightly-2023-12-12");
+    cmd.env("RUSTUP_TOOLCHAIN", RUSTV);
 
     cmd
 }
 
-fn cargo() -> Command {
+fn spec_cargo(ver: &str) -> Command {
     let mut cmd = Command::new("cargo");
-    cmd.env("RUSTUP_TOOLCHAIN", "nightly-2023-12-12");
+    cmd.env("RUSTUP_TOOLCHAIN", ver);
 
     cmd
 }
 
-fn rustc() -> Command {
+fn spec_rustc(ver: &str) -> Command {
     let mut cmd = Command::new("rustc");
-    cmd.env("RUSTUP_TOOLCHAIN", "nightly-2023-12-12");
+    cmd.env("RUSTUP_TOOLCHAIN", ver);
 
     cmd
 }
@@ -212,3 +217,22 @@ macro_rules! error_print {
         }
     };
 }
+
+/*
+ruf_scanner --checkinfo --rustc /home/ubuntu/.rustup/toolchains/nightly-2023-12-12-x86_64-unknown-linux-gnu/bin/rustc -- --crate-name libsecp256k1 --edition=2018
+ /home/ubuntu/.cargo/registry/src/mirrors.ustc.edu.cn-61ef6e0cd06fb9b8/libsecp256k1-0.6.0/src/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type lib
+ --emit=dep-info,metadata,link -C embed-bitcode=no -C debuginfo=2 --cfg feature="default" --cfg feature="hmac" --cfg feature="hmac-drbg" --cfg feature="sha2" --cfg feature="static-context" --cfg
+ feature="std" --cfg feature="typenum" -C metadata=154f7cd92950c9e2 -C extra-filename=-154f7cd92950c9e2 --out-dir
+ /home/ubuntu/Workspaces/Cargo-Ecosystem-Monitor/Code/crate_downloader/on_process/solana-local-cluster/solana-local-cluster-1.9.13/target/debug/deps -L
+ dependency=/home/ubuntu/Workspaces/Cargo-Ecosystem-Monitor/Code/crate_downloader/on_process/solana-local-cluster/solana-local-cluster-1.9.13/target/debug/deps --extern
+ arrayref=/home/ubuntu/Workspaces/Cargo-Ecosystem-Monitor/Code/crate_downloader/on_process/solana-local-cluster/solana-local-cluster-1.9.13/target/debug/deps/libarrayref-51769418d0067876.rmeta --extern
+ base64=/home/ubuntu/Workspaces/Cargo-Ecosystem-Monitor/Code/crate_downloader/on_process/solana-local-cluster/solana-local-cluster-1.9.13/target/debug/deps/libbase64-adbd1c8fc04e1957.rmeta --extern
+ digest=/home/ubuntu/Workspaces/Cargo-Ecosystem-Monitor/Code/crate_downloader/on_process/solana-local-cluster/solana-local-cluster-1.9.13/target/debug/deps/libdigest-553aeee4092a1a80.rmeta --extern
+ hmac_drbg=/home/ubuntu/Workspaces/Cargo-Ecosystem-Monitor/Code/crate_downloader/on_process/solana-local-cluster/solana-local-cluster-1.9.13/target/debug/deps/libhmac_drbg-895ebab67ac95949.rmeta --extern
+ libsecp256k1_core=/home/ubuntu/Workspaces/Cargo-Ecosystem-Monitor/Code/crate_downloader/on_process/solana-local-cluster/solana-local-cluster-1.9.13/target/debug/deps/liblibsecp256k1_core-2a42537dec6fe15
+9.rmeta --extern rand=/home/ubuntu/Workspaces/Cargo-Ecosystem-Monitor/Code/crate_downloader/on_process/solana-local-cluster/solana-local-cluster-1.9.13/target/debug/deps/librand-bf1019cb3e354268.rmeta
+ --extern serde=/home/ubuntu/Workspaces/Cargo-Ecosystem-Monitor/Code/crate_downloader/on_process/solana-local-cluster/solana-local-cluster-1.9.13/target/debug/deps/libserde-9841ebf5c16aadb6.rmeta
+ --extern sha2=/home/ubuntu/Workspaces/Cargo-Ecosystem-Monitor/Code/crate_downloader/on_process/solana-local-cluster/solana-local-cluster-1.9.13/target/debug/deps/libsha2-1725700b33598f2a.rmeta --extern
+ typenum=/home/ubuntu/Workspaces/Cargo-Ecosystem-Monitor/Code/crate_downloader/on_process/solana-local-cluster/solana-local-cluster-1.9.13/target/debug/deps/libtypenum-37e8da50dfc9f34b.rmeta --cap-lints
+ allow
+*/

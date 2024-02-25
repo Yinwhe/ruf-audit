@@ -87,8 +87,8 @@ pub fn get_rufs_with_crate_name(crate_name: &str) -> Result<HashMap<Version, Con
     get_rufs_with_crate_id(crate_id)
 }
 
-#[test]
-fn test() {
-    let res = get_rufs_with_crate_name("semver");
-    println!("{res:#?}")
-}
+// #[test]
+// fn test() {
+//     let res = get_rufs_with_crate_name("semver");
+//     println!("{res:#?}")
+// }

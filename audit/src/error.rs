@@ -13,6 +13,13 @@ impl AuditError {
             Self::Functionality(_) => false,
         }
     }
+
+    pub fn exit_code(&self) -> i32 {
+        match self {
+            Self::Unexpected(_) => -1,
+            Self::Functionality(_) => -2,
+        }
+    }
 }
 
 impl Display for AuditError {

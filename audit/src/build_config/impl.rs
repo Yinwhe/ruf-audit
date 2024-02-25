@@ -5,11 +5,12 @@ use std::process::{Command, Stdio};
 use basic_usages::external::fxhash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use basic_usages::ruf_check_info::{CondRufs, UsedRufs};
 use basic_usages::ruf_lifetime::{get_ruf_all_status, get_ruf_status, RUSTC_VER_NUM};
+use basic_usages::rustc_version::get_nightly_version;
 
 use super::BuildConfig;
 use crate::error::AuditError;
-use crate::scanner;
 use crate::RE_USEDFEATS;
+use crate::{scanner, RE_RUSTC_VRESION};
 
 impl<'short, 'long: 'short> BuildConfig<'long> {
     pub fn default() -> Result<Self, AuditError> {
@@ -56,13 +57,26 @@ impl<'short, 'long: 'short> BuildConfig<'long> {
                 + "/.cargo"
         };
 
+        let rust_version = RE_RUSTC_VRESION
+            .captures(&profiles)
+            .ok_or_else(|| AuditError::Unexpected(format!("cannot fetch rustc version")))?
+            .get(1)
+            .expect("Fatal, resolve rustc version fails")
+            .as_str()
+            .parse::<u32>()
+            .expect("Fatal, parse rustc version fails");
+
+        let ori_rust_version = rust_version;
+
         let crates_cfgs = HashMap::default();
 
         Ok(BuildConfig {
             host,
             rustup_home,
             cargo_home,
-            rust_version: 63,
+            rust_version,
+            ori_rust_version,
+
             cargo_args: None,
             crates_cfgs,
 
@@ -81,8 +95,16 @@ impl<'short, 'long: 'short> BuildConfig<'long> {
         self.crates_cfgs.insert(crate_name, cfgs);
     }
 
+    pub fn update_rust_version(&mut self, rust_version: u32) {
+        self.rust_version = rust_version;
+    }
+
     pub fn update_cargo_args(&mut self, cargo_args: &'long [String]) {
         self.cargo_args = Some(cargo_args)
+    }
+
+    pub fn restore_rust_version(&mut self) {
+        self.rust_version = self.ori_rust_version
     }
 
     /// Filter used rufs in current configurations
@@ -200,6 +222,10 @@ impl<'short, 'long: 'short> BuildConfig<'long> {
             rustup_home = self.rustup_home,
             host = self.host
         )
+    }
+
+    pub fn get_rustc_spec(&self) -> &str {
+        get_nightly_version(self.rust_version)
     }
 
     pub fn get_cargo_args(&'long self) -> Option<&'short [String]> {

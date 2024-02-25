@@ -14,7 +14,7 @@ use tame_index::external::reqwest;
 use tame_index::utils::flock::LockOptions;
 use tame_index::{IndexLocation, KrateName, SparseIndex};
 
-use crate::cargo;
+use crate::{spec_cargo, RUSTV};
 use crate::error::AuditError;
 
 use super::DepManager;
@@ -214,7 +214,7 @@ impl DepManager<'_> {
     ) -> Result<(), AuditError> {
         let name_ver = format!("{name}@{cur_ver}");
 
-        let mut cargo = cargo();
+        let mut cargo = spec_cargo(RUSTV);
         cargo.args(["update", &name_ver, "--precise", update_ver]);
 
         let output = cargo.output().expect("Fatal, execute cargo update fails");

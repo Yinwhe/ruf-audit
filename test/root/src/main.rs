@@ -1,5 +1,5 @@
 #![feature(thread_local)]
-#![cfg_attr(feature = "hello", feature(no_std))]
+#![cfg_attr(target_os="unix", feature(no_std))]
 
 fn main() {
     println!("Hello, this is root!");

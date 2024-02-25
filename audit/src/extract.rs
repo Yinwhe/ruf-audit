@@ -7,14 +7,14 @@ use basic_usages::ruf_check_info::{CheckInfo, UsedRufs};
 
 use crate::build_config::BuildConfig;
 use crate::error::AuditError;
-use crate::{cargo, warn_print, RE_CHECKINFO};
+use crate::{spec_cargo, warn_print, RE_CHECKINFO, RUSTV};
 
 /// rufs usage extract, based on `cargo check`
 pub fn extract(
     config: &mut BuildConfig,
     quiet: bool,
 ) -> Result<HashMap<String, UsedRufs>, AuditError> {
-    let mut cmd = cargo();
+    let mut cmd = spec_cargo(RUSTV);
     cmd.args(["rustc", "-Z", "unstable-options", "--keep-going"]);
     if let Some(cargo_args) = config.get_cargo_args() {
         cmd.args(cargo_args);
@@ -55,7 +55,10 @@ pub fn extract(
 
         // We may not stop here, keeps on going and just print errors,
         // since we only cares ruf usage, rather than syntax error or things like that.
-        warn_print!(quiet, "Building issues", &format!("extraction incomplete, mostly due to syntax fatal errors (you can check details with cargo), but we will keep on going: {err}"));
+
+        // TODO: this could cause problems, when compile just fails, but we still keep on going
+        // warn_print!(quiet, "Building issues", &format!("extraction incomplete, mostly due to syntax fatal errors (you can check details with cargo), but we will keep on going: {err}"));
+        return Err(AuditError::Unexpected(format!("cargo failure: {err}")));
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);

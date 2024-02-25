@@ -1,5 +1,5 @@
-// #![feature(deprecated_safe)]
+#![feature(deprecated_safe)]
 
 pub fn dep3_hello() {
-    println!("Hello, this is dep3 !")
+    println!("Hello, this is dep3 !");
 }
