@@ -349,6 +349,102 @@ fn fix_with_rustc(
     })
 }
 
+
+pub fn test(mut config: BuildConfig) -> i32 {
+    // we test no fix first
+    fn show_result(result: (bool, bool, bool, bool)) {
+        println!(
+            "\n===({},{},{},{})===\n",
+            result.0, result.1, result.2, result.3
+        );
+    }
+
+    let mut result = (true, true, true, true);
+
+    info_print!(false, "Test 1", "no fix ruf usage");
+    let used_rufs = match extract(&mut config, true) {
+        Ok(used_rufs) => used_rufs,
+        Err(err) => {
+            error_print!(false, &format!("extract used rufs fail: {err}"));
+            return -1;
+        }
+    };
+
+    if used_rufs.iter().all(|(_, rufs)| config.rufs_usable(rufs)) {
+        info_print!(false, "Test 1", "ruf usage ok");
+        show_result(result);
+        return 0;
+    }
+    result.0 = false;
+
+    info_print!(false, "Test 2", "no dep tree fix, only rustc fix");
+    let mut usable_rustc = HashSet::from_iter(0..=63);
+    for rufs in used_rufs.into_values() {
+        let ur = config.usable_rustc_for_rufs(&rufs);
+        usable_rustc = usable_rustc.intersection(&ur).cloned().collect();
+    }
+
+    if !usable_rustc.is_empty() {
+        info_print!(
+            false,
+            "Test 2",
+            &format!("rustc fix: {:?}", usable_rustc.into_iter().max())
+        );
+        show_result(result);
+        return 0;
+    }
+    result.1 = false;
+
+    info_print!(false, "Test 3", "no rustc fix, only min dep tree");
+    let mut cargo = spec_cargo(RUSTV);
+    cargo.args(["generate-lockfile", "-Z", "minimal-versions"]);
+    if matches!(
+        cargo.output().map(|output| output.status.success()),
+        Err(_) | Ok(false)
+    ) {
+        error_print!(false, &format!("cannot generate minimal dep tree"));
+        return -1;
+    }
+
+    let used_rufs = match extract(&mut config, true) {
+        Ok(used_rufs) => used_rufs,
+        Err(err) => {
+            error_print!(false, &format!("extract used rufs fail: {err}"));
+            return -1;
+        }
+    };
+
+    if used_rufs.iter().all(|(_, rufs)| config.rufs_usable(rufs)) {
+        info_print!(false, "Test 3", "ruf usage ok");
+        show_result(result);
+        return 0;
+    }
+    result.2 = false;
+
+    info_print!(false, "Test 4", "min dep tree, and rustc fix");
+    let mut usable_rustc = HashSet::from_iter(0..=63);
+    for rufs in used_rufs.into_values() {
+        let ur = config.usable_rustc_for_rufs(&rufs);
+        usable_rustc = usable_rustc.intersection(&ur).cloned().collect();
+    }
+
+    if !usable_rustc.is_empty() {
+        info_print!(
+            false,
+            "Test 4",
+            &format!("rustc fix: {:?}", usable_rustc.into_iter().max())
+        );
+        show_result(result);
+        return 0;
+    }
+    result.3 = false;
+
+    info_print!(false, "Failed", "cannot fix ruf issues");
+    show_result(result);
+    return -2;
+}
+
+/* 
 pub fn test(mut config: BuildConfig) -> i32 {
     // we test no fix first
     fn show_result(result: (bool, bool, bool, bool)) {
@@ -493,3 +589,4 @@ fn check_status(config: &BuildConfig) -> Option<String> {
 
     None
 }
+*/

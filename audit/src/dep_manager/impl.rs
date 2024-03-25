@@ -12,10 +12,10 @@ use petgraph::visit::EdgeRef;
 use tame_index::external::reqwest;
 // use tame_index::index::FileLock;
 use tame_index::utils::flock::LockOptions;
-use tame_index::{IndexLocation, KrateName, SparseIndex};
+use tame_index::{IndexLocation, IndexVersion, KrateName, SparseIndex};
 
-use crate::{spec_cargo, RUSTV};
 use crate::error::AuditError;
+use crate::{spec_cargo, RUSTV};
 
 use super::DepManager;
 
