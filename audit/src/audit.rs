@@ -366,7 +366,7 @@ pub fn test(mut config: BuildConfig) -> i32 {
         Ok(used_rufs) => used_rufs,
         Err(err) => {
             error_print!(false, &format!("extract used rufs fail: {err}"));
-            return -1;
+            return 1;
         }
     };
 
@@ -403,14 +403,14 @@ pub fn test(mut config: BuildConfig) -> i32 {
         Err(_) | Ok(false)
     ) {
         error_print!(false, &format!("cannot generate minimal dep tree"));
-        return -1;
+        return 1;
     }
 
     let used_rufs = match extract(&mut config, true) {
         Ok(used_rufs) => used_rufs,
         Err(err) => {
             error_print!(false, &format!("extract used rufs fail: {err}"));
-            return -1;
+            return 1;
         }
     };
 
@@ -441,7 +441,7 @@ pub fn test(mut config: BuildConfig) -> i32 {
 
     info_print!(false, "Failed", "cannot fix ruf issues");
     show_result(result);
-    return -2;
+    return 2;
 }
 
 /* 
