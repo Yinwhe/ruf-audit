@@ -57,8 +57,8 @@ pub fn extract(
         // since we only cares ruf usage, rather than syntax error or things like that.
 
         // TODO: this could cause problems, when compile just fails, but we still keep on going
-        // warn_print!(quiet, "Building issues", &format!("extraction incomplete, mostly due to syntax fatal errors (you can check details with cargo), but we will keep on going: {err}"));
-        return Err(AuditError::Unexpected(format!("cargo failure: {err}")));
+        warn_print!(quiet, "Building issues", &format!("extraction incomplete, mostly due to syntax fatal errors (you can check details with cargo), but we will keep on going: {err}"));
+        // return Err(AuditError::Unexpected(format!("cargo failure: {err}")));
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
