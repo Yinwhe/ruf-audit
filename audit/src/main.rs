@@ -1,4 +1,6 @@
 use std::env;
+use std::env::current_exe;
+use std::path::PathBuf;
 use std::process::{exit, Command};
 
 use ansi_term::{Color, Style};
@@ -40,6 +42,11 @@ lazy_static! {
 
         let async_drain = Async::new(file_logger.fuse()).build().fuse();
         Logger::root(async_drain, o!())
+    };
+    pub static ref SCANNER_PATH: PathBuf = {
+        let mut path = current_exe().expect("current executable path invalid");
+        path.set_file_name("ruf_scanner");
+        path
     };
 }
 
@@ -171,7 +178,7 @@ fn main() {
 }
 
 fn scanner() -> Command {
-    let mut cmd = Command::new("ruf_scanner");
+    let mut cmd = Command::new(SCANNER_PATH.as_os_str());
     cmd.env("RUSTUP_TOOLCHAIN", RUSTV);
 
     cmd
