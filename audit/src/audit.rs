@@ -349,7 +349,61 @@ fn fix_with_rustc(
     })
 }
 
+pub fn test(mut config: BuildConfig) -> i32 {
+    // we test no fix first
+    fn show_result(result: (bool, bool)) {
+        println!("\n===({},{})===\n", result.0, result.1);
+    }
 
+    let mut result = (true, true);
+    info_print!(false, "Test 1", "no fix ruf usage");
+    let used_rufs = match extract(&mut config, true) {
+        Ok(used_rufs) => used_rufs,
+        Err(err) => {
+            error_print!(false, &format!("extract used rufs fail: {err}"));
+            return 1;
+        }
+    };
+
+    if used_rufs.iter().all(|(_, rufs)| config.rufs_usable(rufs)) {
+        info_print!(false, "Test 1", "ruf usage ok");
+        show_result(result);
+        return 0;
+    }
+    result.0 = false;
+
+    info_print!(false, "Test 2", "not rustc fix, only stepping dep tree fix");
+
+    let mut dm = match DepManager::new() {
+        Ok(dm) => dm,
+        Err(e) => {
+            error_print!(false, &format!("fix failed due to: {e}"));
+            return 1;
+        }
+    };
+
+    let err = match fix_with_dep(&mut config, used_rufs, &mut dm, false) {
+        Ok(()) => {
+            info_print!(false, "Test 2", "issue fixed");
+            show_result(result);
+            return 0;
+        }
+        Err(e) => e,
+    };
+
+    if let AuditError::Unexpected(e) = err {
+        error_print!(false, &format!("fix failed due to: {e}"));
+        return 1;
+    } else {
+        result.1 = false;
+        info_print!(false, "Failed", "cannot fix ruf issues");
+        show_result(result);
+        return 2;
+    }
+}
+
+// test without build check
+/*
 pub fn test(mut config: BuildConfig) -> i32 {
     // we test no fix first
     fn show_result(result: (bool, bool, bool, bool)) {
@@ -443,8 +497,10 @@ pub fn test(mut config: BuildConfig) -> i32 {
     show_result(result);
     return 2;
 }
+ */
 
-/* 
+// test with build check
+/*
 pub fn test(mut config: BuildConfig) -> i32 {
     // we test no fix first
     fn show_result(result: (bool, bool, bool, bool)) {
