@@ -10,7 +10,7 @@ use crate::ruf_check_info::CondRufs;
 use super::ruf_check_info::CondRuf;
 
 /*
-CREATE VIEW version_ruf AS
+CREATE TABLE version_ruf AS
 SELECT versions.id, versions.num, versions.crate_id, version_feature_ori.conds, version_feature_ori.feature
 FROM versions
 JOIN version_feature_ori

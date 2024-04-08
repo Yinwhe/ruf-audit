@@ -36,12 +36,15 @@ impl DepManager<'_> {
             ))
         })?;
 
-        let metadata = MetadataCommand::new().exec().map_err(|e| {
-            AuditError::Unexpected(format!(
-                "cannot build DepManager, load metadata fails: {}",
-                e
-            ))
-        })?;
+        let metadata = MetadataCommand::new()
+            .env("RUSTUP_TOOLCHAIN", RUSTV)
+            .exec()
+            .map_err(|e| {
+                AuditError::Unexpected(format!(
+                    "cannot build DepManager, load metadata fails: {}",
+                    e
+                ))
+            })?;
 
         let mut local_crates = HashMap::default();
         for pkg in metadata.packages {
@@ -98,6 +101,7 @@ impl DepManager<'_> {
         // if local, no candidates
         let name_ver = format!("{}@{}", pkg.name, pkg.version);
         if self.local_crates.contains_key(&name_ver) {
+            // println!("[Debug - get_candidates] local {name_ver}, no candidates");
             return Ok(HashMap::default());
         }
 
@@ -106,6 +110,11 @@ impl DepManager<'_> {
 
         let candidates = basic_usages::ruf_db_usage::get_rufs_with_crate_name(pkg.name.as_str())
             .map_err(|e| AuditError::Unexpected(e))?;
+
+        // println!(
+        //     "[Debug - get_candidates] get {name_ver}, candidats: {:?}",
+        //     candidates.iter().map(|(v, _)| v.to_string()).collect::<Vec<String>>()
+        // );
 
         // collect version req
         let mut version_reqs = Vec::new();
@@ -122,7 +131,7 @@ impl DepManager<'_> {
                 .keys()
                 .filter(|key| req.matches(key))
                 .min()
-                .expect("Fatal, no packages available");
+                .expect("Fatal, no packages available, posibilly db issues");
             version_reqs.push((p, req, lowest));
         }
 

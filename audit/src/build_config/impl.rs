@@ -1,8 +1,8 @@
 use std::env;
 use std::io::Write;
 use std::process::{Command, Stdio};
-
 use basic_usages::external::fxhash::{FxHashMap as HashMap, FxHashSet as HashSet};
+use basic_usages::external::serde_json;
 use basic_usages::ruf_check_info::{CondRufs, UsedRufs};
 use basic_usages::ruf_lifetime::{get_ruf_all_status, get_ruf_status, RUSTC_VER_NUM};
 use basic_usages::rustc_version::get_nightly_version;
@@ -90,7 +90,7 @@ impl<'short, 'long: 'short> BuildConfig<'long> {
     pub fn update_build_cfgs(&mut self, crate_name: String, cfgs: HashSet<String>) {
         // println!("[Debug - update_build_cfgs] {crate_name}");
         // for cfg in &cfgs {
-        //     println!("[Debug - update_build_cfgs] {cfg}");
+        //     println!("[Debug - update_build_cfgs] {cfg:?}");
         // }
         self.crates_cfgs.insert(crate_name, cfgs);
     }
@@ -116,7 +116,7 @@ impl<'short, 'long: 'short> BuildConfig<'long> {
         for ruf in rufs.into_iter() {
             if let Some(cond) = &ruf.cond {
                 content.push_str(&format!(
-                    "#[cfg_attr({}, feature({}))]\n",
+                    "#![cfg_attr({}, feature({}))]\n",
                     cond, ruf.feature
                 ))
             } else {
@@ -126,21 +126,27 @@ impl<'short, 'long: 'short> BuildConfig<'long> {
 
         // use scanner to check cfg rufs
         if !content.is_empty() {
+            content.push_str("fn main(){}\n");
+
             let cfgs = self
                 .crates_cfgs
-                .get(crate_name)
+                .get(&crate_name.replace("-", "_"))
                 .expect(&format!("Fatal, no cfgs found with {crate_name}"));
 
-            // println!("[Debug - filter_rufs] {crate_name} {cfgs:?}");
-            let mut cfg_args = String::new();
-            for cfg in cfgs {
-                cfg_args.push_str(&format!("--cfg {}", cfg));
-            }
 
-            let scanner = scanner()
-                .args(["--", "-"])
-                .arg(cfg_args)
+            // println!("[Debug - filter_rufs] content: \n{content}\ncfg: {cfgs:?}");
+            let mut scanner = scanner();
+            scanner.arg("--");
+            for cfg in cfgs {
+                let cfg: String = serde_json::from_str(&format!("\"{cfg}\"")).unwrap();
+                scanner.args(["--cfg", &cfg]);
+            }
+            scanner.arg("-");
+
+            // println!("[Debug - filter_rufs] scanner {:?}", scanner);
+            let scanner = scanner
                 .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
                 .env("LD_LIBRARY_PATH", self.get_rustlib_path())
                 .spawn()
                 .expect("Fatal, cannot spawn scanner output");
@@ -167,6 +173,7 @@ impl<'short, 'long: 'short> BuildConfig<'long> {
             }
 
             let stdout = String::from_utf8_lossy(&output.stdout);
+            // println!("[Debug - filter_rufs] stdout: {stdout}");
             if let Some(caps) = RE_USEDFEATS.captures(&stdout) {
                 used_rufs.extend(UsedRufs::from(
                     caps.get(1).expect("Fatal, resolve ruf fails").as_str(),

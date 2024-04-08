@@ -145,6 +145,13 @@ fn main() {
         match extract(&mut config, false) {
             Ok(used_rufs) => {
                 println!("extract success: {used_rufs:?}");
+                for (name, rufs) in used_rufs {
+                    if config.rufs_usable(&rufs) {
+                        println!("crate {name} ruf usage ok");
+                    } else {
+                        println!("crate {name} ruf usage not ok");
+                    }
+                }
             }
             Err(_e) => {}
         }

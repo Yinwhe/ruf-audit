@@ -109,6 +109,8 @@ fn fix_with_dep(
 ) -> Result<(), AuditError> {
     // this algo will ends, because we have a finite number of crates
     // and each time we slim down the candidates.
+    // println!("[Debug - fix_with_dep] used_rufs: {used_rufs:?}");
+
     loop {
         let graph = dm.graph();
         let root = dm.root();
@@ -117,8 +119,9 @@ fn fix_with_dep(
         let mut bfs = visit::Bfs::new(&graph, root);
         while let Some(nx) = bfs.next(&graph) {
             let node = &graph[nx];
+            // println!("[Debug - fix_with_dep] check package {}", node.name);
             // though we record all used crates, `Cargo.lock` seems to record optional deps too.
-            if let Some(rufs) = used_rufs.get(node.name.as_str()) {
+            if let Some(rufs) = used_rufs.get(&node.name.as_str().replace("-", "_")) {
                 if !config.rufs_usable(&rufs) {
                     issued_depnx = Some(nx);
                     break;
@@ -143,18 +146,25 @@ fn fix_with_dep(
 
         // Canditate versions, restricted by semver, no rufs checks
         let candidate_vers = dm.get_candidates(issued_depnx)?;
-        // println!("[Debug] candidates: {:?}", candidate_vers);
 
         // here we check rufs
         let mut usable_vers = vec![];
         for cad in candidate_vers {
             let used_rufs = config.filter_rufs(issued_dep.name.as_str(), cad.1)?;
+            // println!("[Debug - fix_with_dep] filter {} - {:?}", cad.0.to_string(), used_rufs);
             if config.rufs_usable(&used_rufs) {
                 usable_vers.push(cad.0);
             }
         }
 
         // donw fix first
+        // println!(
+        //     "[Debug - fix_with_dep] usable: {:?}",
+        //     usable_vers
+        //         .iter()
+        //         .map(|v| v.to_string())
+        //         .collect::<Vec<String>>()
+        // );
         let choose = if config.is_newer_fix() {
             usable_vers.into_iter().max()
         } else {
@@ -350,6 +360,8 @@ fn fix_with_rustc(
 }
 
 pub fn test(mut config: BuildConfig) -> i32 {
+    // config.set_newer_fix(true);
+
     // we test no fix first
     fn show_result(result: (bool, bool)) {
         println!("\n===({},{})===\n", result.0, result.1);
