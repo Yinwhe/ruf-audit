@@ -359,6 +359,7 @@ fn fix_with_rustc(
     })
 }
 
+/*
 pub fn test(mut config: BuildConfig) -> i32 {
     // config.set_newer_fix(true);
 
@@ -369,7 +370,7 @@ pub fn test(mut config: BuildConfig) -> i32 {
 
     let mut result = (true, true);
     info_print!(false, "Test 1", "no fix ruf usage");
-    let used_rufs = match extract(&mut config, true) {
+    let used_rufs = match extract(&mut config, false) {
         Ok(used_rufs) => used_rufs,
         Err(err) => {
             error_print!(false, &format!("extract used rufs fail: {err}"));
@@ -413,9 +414,10 @@ pub fn test(mut config: BuildConfig) -> i32 {
         return 2;
     }
 }
+*/
+
 
 // test without build check
-/*
 pub fn test(mut config: BuildConfig) -> i32 {
     // we test no fix first
     fn show_result(result: (bool, bool, bool, bool)) {
@@ -428,7 +430,7 @@ pub fn test(mut config: BuildConfig) -> i32 {
     let mut result = (true, true, true, true);
 
     info_print!(false, "Test 1", "no fix ruf usage");
-    let used_rufs = match extract(&mut config, true) {
+    let used_rufs = match extract(&mut config, false) {
         Ok(used_rufs) => used_rufs,
         Err(err) => {
             error_print!(false, &format!("extract used rufs fail: {err}"));
@@ -509,7 +511,6 @@ pub fn test(mut config: BuildConfig) -> i32 {
     show_result(result);
     return 2;
 }
- */
 
 // test with build check
 /*
