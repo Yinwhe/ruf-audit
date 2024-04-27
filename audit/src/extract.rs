@@ -1,3 +1,5 @@
+//! This files do ruf detection and extractions.
+
 use std::env::current_exe;
 use std::io::{BufRead, BufReader};
 use std::process::Stdio;
@@ -9,7 +11,7 @@ use crate::build_config::BuildConfig;
 use crate::error::AuditError;
 use crate::{spec_cargo, warn_print, RE_CHECKINFO, RUSTV};
 
-/// rufs usage extract, based on `cargo check`
+/// rufs usage extract, based on `cargo rustc`.
 pub fn extract(
     config: &mut BuildConfig,
     quiet: bool,
@@ -55,9 +57,9 @@ pub fn extract(
 
         // We may not stop here, keeps on going and just print errors,
         // since we only cares ruf usage, rather than syntax error or things like that.
-
-        // TODO: this could cause problems, when compile just fails, but we still keep on going
-        warn_print!(quiet, "Building issues", &format!("extraction incomplete, mostly due to syntax fatal errors (you can check details with cargo), but we will keep on going: {err}"));
+        //
+        // However this could cause problems, when compile just fails, we may left out some ruf usages.
+        warn_print!(quiet, "Building issues", &format!("extraction incomplete, due to: {err}"));
         // return Err(AuditError::Unexpected(format!("cargo failure: {err}")));
     }
 

@@ -26,7 +26,7 @@ use build_config::BuildConfig;
 
 mod dep_manager;
 
-// Some regex definitions.
+// Some predefined things
 lazy_static! {
     pub static ref RE_USEDFEATS: Regex = Regex::new(r"FDelimiter::\{(.*?)\}::FDelimiter").unwrap();
     pub static ref RE_CHECKINFO: Regex = Regex::new(r"CDelimiter::\{(.*?)\}::CDelimiter").unwrap();
@@ -50,6 +50,7 @@ lazy_static! {
     };
 }
 
+// inner rustc versions
 const RUSTV: &str = "nightly-2023-12-12";
 
 fn main() {
@@ -63,13 +64,13 @@ fn main() {
     };
 
     let args: Vec<String> = env::args().collect();
-    // info!(LOGGER, "startup command line: {:?}", &args);
+    // debug!(LOGGER, "startup command line: {:?}", &args);
 
-    // cargo wrapper usage, act as scanner.
+    // cargo wrapper usage, act as scanner, but collect infos.
     if args.len() >= 2 && args[1] == config.get_audit_rustc_path() {
         // debug!(LOGGER, "scanner args: {args:?}");
 
-        // We use original rustc to do some information fetch
+        // We directly use rustc to do some information fetch
         let status = if args[2] == "-" {
             // debug!(LOGGER, "Use rustc, inherit std");
             spec_rustc(RUSTV)
@@ -82,7 +83,7 @@ fn main() {
             // debug!(LOGGER, "Use audit, pass by pipe");
 
             // And here we do the scan operation, after scan we launch real rustc,
-            // this is essential, since some crates has build scripts or things like that.
+            // this is essential, since some crates has build scripts or things to be built firsts.
             // Besides, we gain incremental check from cargo for launching real rustc, which is good
             // for later repeated extract process.
             scanner()
@@ -96,24 +97,12 @@ fn main() {
         };
 
         // debug!(LOGGER, "scanner exit");
-        exit(status.code().unwrap_or(-1))
+        exit(status.code().expect("Fatal, no exit codes from scanner"));
     }
-
-    let my_args = if let Some(split_index) = args.iter().position(|arg| arg == "--") {
-        config.update_cargo_args(&args[split_index + 1..]);
-        &args[..split_index]
-    } else {
-        &args
-    };
 
     let mut opts = Options::new();
     opts.optflag("h", "help", "Print help information");
     opts.optflag("", "extract", "Extract rufs used in current configurations");
-    opts.optflag(
-        "",
-        "newer-fix",
-        "Attempt to choose newer version when fixing dep trees",
-    );
     opts.optflag(
         "",
         "quick-fix",
@@ -121,6 +110,13 @@ fn main() {
     );
     opts.optflag("", "verbose", "Print audit detail info");
     opts.optflag("", "test", "Only used for test purpose");
+
+    let my_args = if let Some(split_index) = args.iter().position(|arg| arg == "--") {
+        config.update_cargo_args(&args[split_index + 1..]);
+        &args[..split_index]
+    } else {
+        &args
+    };
 
     let matches = match opts.parse(my_args) {
         Ok(m) => m,
@@ -159,10 +155,6 @@ fn main() {
         exit(0);
     }
 
-    if matches.opt_present("newer-fix") {
-        config.set_newer_fix(true);
-    }
-
     if matches.opt_present("quick-fix") {
         config.set_quick_fix(true);
     }
@@ -176,8 +168,6 @@ fn main() {
         let exit_code = test(config);
         exit(exit_code);
     }
-
-    // warn!(LOGGER, "Exec audit, this function shall be exec only once globally!");
 
     // default we do ruf audit
     let exit_code = audit(config, false);
@@ -231,22 +221,3 @@ macro_rules! error_print {
         }
     };
 }
-
-/*
-ruf_scanner --checkinfo --rustc /home/ubuntu/.rustup/toolchains/nightly-2023-12-12-x86_64-unknown-linux-gnu/bin/rustc -- --crate-name libsecp256k1 --edition=2018
- /home/ubuntu/.cargo/registry/src/mirrors.ustc.edu.cn-61ef6e0cd06fb9b8/libsecp256k1-0.6.0/src/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type lib
- --emit=dep-info,metadata,link -C embed-bitcode=no -C debuginfo=2 --cfg feature="default" --cfg feature="hmac" --cfg feature="hmac-drbg" --cfg feature="sha2" --cfg feature="static-context" --cfg
- feature="std" --cfg feature="typenum" -C metadata=154f7cd92950c9e2 -C extra-filename=-154f7cd92950c9e2 --out-dir
- /home/ubuntu/Workspaces/Cargo-Ecosystem-Monitor/Code/crate_downloader/on_process/solana-local-cluster/solana-local-cluster-1.9.13/target/debug/deps -L
- dependency=/home/ubuntu/Workspaces/Cargo-Ecosystem-Monitor/Code/crate_downloader/on_process/solana-local-cluster/solana-local-cluster-1.9.13/target/debug/deps --extern
- arrayref=/home/ubuntu/Workspaces/Cargo-Ecosystem-Monitor/Code/crate_downloader/on_process/solana-local-cluster/solana-local-cluster-1.9.13/target/debug/deps/libarrayref-51769418d0067876.rmeta --extern
- base64=/home/ubuntu/Workspaces/Cargo-Ecosystem-Monitor/Code/crate_downloader/on_process/solana-local-cluster/solana-local-cluster-1.9.13/target/debug/deps/libbase64-adbd1c8fc04e1957.rmeta --extern
- digest=/home/ubuntu/Workspaces/Cargo-Ecosystem-Monitor/Code/crate_downloader/on_process/solana-local-cluster/solana-local-cluster-1.9.13/target/debug/deps/libdigest-553aeee4092a1a80.rmeta --extern
- hmac_drbg=/home/ubuntu/Workspaces/Cargo-Ecosystem-Monitor/Code/crate_downloader/on_process/solana-local-cluster/solana-local-cluster-1.9.13/target/debug/deps/libhmac_drbg-895ebab67ac95949.rmeta --extern
- libsecp256k1_core=/home/ubuntu/Workspaces/Cargo-Ecosystem-Monitor/Code/crate_downloader/on_process/solana-local-cluster/solana-local-cluster-1.9.13/target/debug/deps/liblibsecp256k1_core-2a42537dec6fe15
-9.rmeta --extern rand=/home/ubuntu/Workspaces/Cargo-Ecosystem-Monitor/Code/crate_downloader/on_process/solana-local-cluster/solana-local-cluster-1.9.13/target/debug/deps/librand-bf1019cb3e354268.rmeta
- --extern serde=/home/ubuntu/Workspaces/Cargo-Ecosystem-Monitor/Code/crate_downloader/on_process/solana-local-cluster/solana-local-cluster-1.9.13/target/debug/deps/libserde-9841ebf5c16aadb6.rmeta
- --extern sha2=/home/ubuntu/Workspaces/Cargo-Ecosystem-Monitor/Code/crate_downloader/on_process/solana-local-cluster/solana-local-cluster-1.9.13/target/debug/deps/libsha2-1725700b33598f2a.rmeta --extern
- typenum=/home/ubuntu/Workspaces/Cargo-Ecosystem-Monitor/Code/crate_downloader/on_process/solana-local-cluster/solana-local-cluster-1.9.13/target/debug/deps/libtypenum-37e8da50dfc9f34b.rmeta --cap-lints
- allow
-*/

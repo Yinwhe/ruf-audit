@@ -10,9 +10,9 @@ use cargo_metadata::semver::VersionReq;
 use cargo_metadata::MetadataCommand;
 use petgraph::visit::EdgeRef;
 use tame_index::external::reqwest;
-// use tame_index::index::FileLock;
 use tame_index::utils::flock::LockOptions;
-use tame_index::{IndexLocation, IndexVersion, KrateName, SparseIndex};
+use tame_index::{IndexLocation, KrateName, SparseIndex};
+// use tame_index::index::FileLock;
 
 use crate::error::AuditError;
 use crate::{spec_cargo, RUSTV};
@@ -24,32 +24,27 @@ impl DepManager<'_> {
     pub fn new() -> Result<Self, AuditError> {
         let lockfile = Lockfile::load("Cargo.lock").map_err(|e| {
             AuditError::Unexpected(format!(
-                "cannot build DepManager, load lock file fails: {}",
-                e
+                "cannot build DepManager, load lock file fails: {e}",
             ))
         })?;
 
         let dep_tree = lockfile.dependency_tree().map_err(|e| {
-            AuditError::Unexpected(format!(
-                "cannot build DepManager, load lock file fails: {}",
-                e
-            ))
+            AuditError::Unexpected(format!("cannot build DepManager, load dep tree fails: {e}",))
         })?;
 
         let metadata = MetadataCommand::new()
             .env("RUSTUP_TOOLCHAIN", RUSTV)
             .exec()
             .map_err(|e| {
-                AuditError::Unexpected(format!(
-                    "cannot build DepManager, load metadata fails: {}",
-                    e
-                ))
+                AuditError::Unexpected(
+                    format!("cannot build DepManager, load metadata fails: {e}",),
+                )
             })?;
 
         let mut local_crates = HashMap::default();
         for pkg in metadata.packages {
-            // Local crates
             if pkg.source.is_none() {
+                // no source means local
                 let name_ver = format!("{}@{}", pkg.name, pkg.version);
                 let deps = pkg
                     .dependencies
@@ -64,34 +59,30 @@ impl DepManager<'_> {
         }
 
         let index = SparseIndex::new(IndexLocation::default()).map_err(|e| {
-            AuditError::Unexpected(format!("cannot build DepManager, setup index fails: {}", e))
+            AuditError::Unexpected(format!("cannot build DepManager, setup index fails: {e}"))
         })?;
         let client = reqwest::blocking::Client::builder().build().map_err(|e| {
             AuditError::Unexpected(format!(
-                "cannot build DepManager, setup reqwest client fails: {}",
-                e
+                "cannot build DepManager, setup reqwest client fails: {e}",
             ))
         })?;
 
         let index = tame_index::index::RemoteSparseIndex::new(index, client);
         let lock = LockOptions::cargo_package_lock(None).map_err(|e| {
-            AuditError::Unexpected(format!("cannot build DepManager, setup lock fails: {}", e))
+            AuditError::Unexpected(format!("cannot build DepManager, setup lock fails: {e}"))
         })?;
 
         let req_by = RefCell::new(HashMap::default());
         Ok(Self {
-            // lockfile,
             index,
             lock,
-
             dep_tree,
             req_by,
-
             local_crates,
         })
     }
 
-    /// Use in down fix, get candidates that match it's dependents' version req.
+    /// Used in down fix, get candidates of a node that match it's parents' version req.
     pub fn get_candidates(
         &self,
         pkgnx: NodeIndex,
@@ -109,8 +100,12 @@ impl DepManager<'_> {
         assert!(parents.len() >= 1, "Fatal, root has no parents");
 
         let candidates = basic_usages::ruf_db_usage::get_rufs_with_crate_name(pkg.name.as_str())
-            .map_err(|e| AuditError::Unexpected(e))?;
+            .map_err(|e| AuditError::Unexpected(format!("cannot get candidates, due to {e}")))?;
 
+        // Early return.
+        if candidates.is_empty() {
+            return Ok(candidates);
+        }
         // println!(
         //     "[Debug - get_candidates] get {name_ver}, candidats: {:?}",
         //     candidates.iter().map(|(v, _)| v.to_string()).collect::<Vec<String>>()
@@ -127,53 +122,57 @@ impl DepManager<'_> {
                 .find(|(name, _)| name == pkg.name.as_str())
                 .expect("Fatal, cannot find dependency in parent package")
                 .1;
+            // prepare for relaxing strict parents.
             let lowest = candidates
                 .keys()
                 .filter(|key| req.matches(key))
                 .min()
-                .expect("Fatal, no packages available, posibilly db issues");
+                .cloned()
+                .expect("Fatal, cannot find lowest allowing version");
             version_reqs.push((p, req, lowest));
         }
 
         // We assume parents who restricts the version most is the one not allow min_lowest,
         // and it shall be updated later, if we need up fix.
         // This assumption won't hold for all cases (cases with complex version req),
-        // but most of the times it will works.
+        // but most of the times it works.
         let min_lowest = version_reqs
             .iter()
-            .map(|vr| vr.2)
+            .map(|vr| &vr.2)
             .min()
             .expect("Fatal, no min version found");
 
-        let all_equal = version_reqs.iter().map(|vr| vr.2).all(|v| v == min_lowest);
-
-        let mut req_by = Vec::new();
-        let mut reqs = Vec::new();
-        for version_req in version_reqs {
-            if all_equal || version_req.2 > min_lowest {
-                req_by.push(version_req.0);
+        let mut req_by = None;
+        for version_req in version_reqs.iter() {
+            if version_req.2 > *min_lowest {
+                req_by = Some(version_req.0);
+                break;
             }
-            reqs.push(version_req.1);
         }
 
-        self.req_by.borrow_mut().insert(pkgnx, req_by);
+        self.req_by
+            .borrow_mut()
+            .insert(pkgnx, req_by.expect("Fatal, no strict parent found"));
 
         // we choose candidates as:
         // 1. match its dependents' version req
         // 2. smaller than current version
-        // we will record who restricts the version most, for later up fix
+        // we will record who restricts the version most, for later up fix.
+        //
+        // The ruf usability check will be done later, differ from design.
         let candidates = candidates
             .into_iter()
             .filter(|(ver, _)| {
-                reqs.iter()
-                    .all(|req| req.matches(ver) && ver < &pkg.version)
+                version_reqs
+                    .iter()
+                    .all(|(_, req, _)| req.matches(ver) && ver < &pkg.version)
             })
             .collect();
 
         Ok(candidates)
     }
 
-    /// Used in up fix, get candidates for the dependent, which has older version req
+    /// Used in up fix, same as [`get_candidates`], but get candidates for the dependent, which has older version req
     /// to the dep package.
     pub fn get_candidates_up_fix(
         &self,
@@ -195,18 +194,20 @@ impl DepManager<'_> {
             .get_package_reqs(pkg_name, pkg_ver.as_str())?
             .into_iter()
             .find(|(name, _)| name == dep_name)
-            .expect("Fatal, cannot find dependency in parent package")
+            .expect("Fatal, cannot find dependency in current parent package")
             .1;
 
         for cad in candidates {
             let reqs = self.get_package_reqs(pkg_name, cad.0.to_string().as_str())?;
 
             if let Some((_, req)) = reqs.into_iter().find(|(name, _)| name == dep_name) {
+                // We take the assumption that, older verison shall have looser semver req, 
+                // so if req differs, we assume it's a candidate, since semver comparision can be hard.
                 if req != cur_req {
                     res.insert(cad.0, cad.1);
                 }
             } else {
-                // dep is moved, of course ok
+                // dep not found, possibily not used, thus ok.
                 res.insert(cad.0, cad.1);
             }
         }
@@ -229,7 +230,7 @@ impl DepManager<'_> {
         let output = cargo.output().expect("Fatal, execute cargo update fails");
         if !output.status.success() {
             return Err(AuditError::Unexpected(format!(
-                "execute cargo update fails: {}",
+                "cannot update dep version, execute cargo update fails: {}",
                 String::from_utf8_lossy(&output.stderr)
             )));
         }
@@ -250,12 +251,8 @@ impl DepManager<'_> {
         self.dep_tree.graph()
     }
 
-    pub fn req_by(&self, dep: &NodeIndex) -> Option<Vec<NodeIndex>> {
+    pub fn req_by(&self, dep: &NodeIndex) -> Option<NodeIndex> {
         self.req_by.borrow().get(dep).cloned()
-    }
-
-    pub fn is_local(&self, name_ver: &str) -> bool {
-        self.local_crates.contains_key(name_ver)
     }
 
     fn get_package_reqs(
@@ -335,17 +332,11 @@ impl DepManager<'_> {
 
     fn update_dep_tree(&mut self) -> Result<(), AuditError> {
         let lockfile = Lockfile::load("Cargo.lock").map_err(|e| {
-            AuditError::Unexpected(format!(
-                "cannot build DepManager, load lock file fails: {}",
-                e
-            ))
+            AuditError::Unexpected(format!("cannot update dep tree, load lock file fails: {e}",))
         })?;
 
         let dep_tree = lockfile.dependency_tree().map_err(|e| {
-            AuditError::Unexpected(format!(
-                "cannot build DepManager, load lock file fails: {}",
-                e
-            ))
+            AuditError::Unexpected(format!("cannot update dep tree, load dep tree fails: {e}",))
         })?;
 
         self.dep_tree = dep_tree;

@@ -1,3 +1,5 @@
+//! This modules manipulate package's dependency trees.
+
 use std::cell::RefCell;
 
 use basic_usages::external::fxhash::FxHashMap as HashMap;
@@ -15,9 +17,11 @@ pub struct DepManager<'long> {
     index: RemoteSparseIndex,
     lock: LockOptions<'long>,
 
-    // updates each fresh
+    /// dependency tree of the package; updated after each change.
     dep_tree: Tree,
-    req_by: RefCell<HashMap<NodeIndex, Vec<NodeIndex>>>,
+    /// record parent with strictest semver reqs.
+    req_by: RefCell<HashMap<NodeIndex, NodeIndex>>,
 
+    /// local crates and thire semver reqs on the dependencies.
     local_crates: HashMap<String, Vec<(String, VersionReq)>>,
 }

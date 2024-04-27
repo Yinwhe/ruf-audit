@@ -1,11 +1,10 @@
-use std::env;
-use std::io::Write;
-use std::process::{Command, Stdio};
 use basic_usages::external::fxhash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use basic_usages::external::serde_json;
 use basic_usages::ruf_check_info::{CondRufs, UsedRufs};
 use basic_usages::ruf_lifetime::{get_ruf_all_status, get_ruf_status, RUSTC_VER_NUM};
-use basic_usages::rustc_version::get_nightly_version;
+use std::env;
+use std::io::Write;
+use std::process::{Command, Stdio};
 
 use super::BuildConfig;
 use crate::error::AuditError;
@@ -17,15 +16,15 @@ impl<'short, 'long: 'short> BuildConfig<'long> {
         let mut rustup = Command::new("rustup");
         rustup.arg("show");
 
-        let output = rustup
-            .output()
-            .map_err(|e| AuditError::Unexpected(format!("cannot run rustup: {e}")))?;
+        let output = rustup.output().map_err(|e| {
+            AuditError::Unexpected(format!("cannot build BuildConfig, fail to run rustup: {e}"))
+        })?;
 
         let profiles = if output.status.success() {
             String::from_utf8_lossy(&output.stdout)
         } else {
             return Err(AuditError::Unexpected(
-                "cannot fetch rustup profiles".to_string(),
+                "cannot build BuildConfig, fail to fetch rustup profiles".to_string(),
             ));
         };
 
@@ -34,7 +33,9 @@ impl<'short, 'long: 'short> BuildConfig<'long> {
                 .lines()
                 .find(|line| line.starts_with("Default host:"))
                 .ok_or_else(|| {
-                    AuditError::Unexpected(format!("cannot fetch rustup default host"))
+                    AuditError::Unexpected(format!(
+                        "cannot build BuildConfig, fail to fetch rustup default host"
+                    ))
                 })?;
 
             host_line[13..].trim().to_string()
@@ -44,7 +45,11 @@ impl<'short, 'long: 'short> BuildConfig<'long> {
             let rustup_home_line = profiles
                 .lines()
                 .find(|line| line.starts_with("rustup home:"))
-                .ok_or_else(|| AuditError::Unexpected(format!("cannot fetch rustup home")))?;
+                .ok_or_else(|| {
+                    AuditError::Unexpected(format!(
+                        "cannot build BuildConfig, fail to fetch rustup home"
+                    ))
+                })?;
 
             rustup_home_line[13..].trim().to_string()
         };
@@ -52,21 +57,25 @@ impl<'short, 'long: 'short> BuildConfig<'long> {
         let cargo_home = if let Ok(cargo_home) = env::var("CARGO_HOME") {
             cargo_home
         } else {
-            env::var("HOME")
-                .map_err(|_| AuditError::Unexpected(format!("cannot fetch cargo home")))?
-                + "/.cargo"
+            env::var("HOME").map_err(|_| {
+                AuditError::Unexpected(format!(
+                    "cannot build BuildConfig, fail to fetch cargo home"
+                ))
+            })? + "/.cargo"
         };
 
         let rust_version = RE_RUSTC_VRESION
             .captures(&profiles)
-            .ok_or_else(|| AuditError::Unexpected(format!("cannot fetch rustc version")))?
+            .ok_or_else(|| {
+                AuditError::Unexpected(format!(
+                    "cannot build BuildConfig, fail to fetch rustc version"
+                ))
+            })?
             .get(1)
             .expect("Fatal, resolve rustc version fails")
             .as_str()
             .parse::<u32>()
             .expect("Fatal, parse rustc version fails");
-
-        let ori_rust_version = rust_version;
 
         let crates_cfgs = HashMap::default();
 
@@ -75,12 +84,10 @@ impl<'short, 'long: 'short> BuildConfig<'long> {
             rustup_home,
             cargo_home,
             rust_version,
-            ori_rust_version,
 
             cargo_args: None,
             crates_cfgs,
 
-            newer_fix: false,
             quick_fix: false,
             verbose: false,
             test: false,
@@ -95,21 +102,13 @@ impl<'short, 'long: 'short> BuildConfig<'long> {
         self.crates_cfgs.insert(crate_name, cfgs);
     }
 
-    pub fn update_rust_version(&mut self, rust_version: u32) {
-        self.rust_version = rust_version;
-    }
-
     pub fn update_cargo_args(&mut self, cargo_args: &'long [String]) {
         self.cargo_args = Some(cargo_args)
     }
 
-    pub fn restore_rust_version(&mut self) {
-        self.rust_version = self.ori_rust_version
-    }
-
-    /// Filter used rufs in current configurations
+    /// Filter used rufs in current configurations.
+    /// This step need support of our database.
     pub fn filter_rufs(&self, crate_name: &str, rufs: CondRufs) -> Result<UsedRufs, AuditError> {
-        // let tmp_rsfile_path = self.get_tmp_rsfile();
         let mut content = String::new();
         let mut used_rufs = UsedRufs::empty();
 
@@ -126,13 +125,13 @@ impl<'short, 'long: 'short> BuildConfig<'long> {
 
         // use scanner to check cfg rufs
         if !content.is_empty() {
+            // We need a main or the command may fails
             content.push_str("fn main(){}\n");
 
             let cfgs = self
                 .crates_cfgs
                 .get(&crate_name.replace("-", "_"))
                 .expect(&format!("Fatal, no cfgs found with {crate_name}"));
-
 
             // println!("[Debug - filter_rufs] content: \n{content}\ncfg: {cfgs:?}");
             let mut scanner = scanner();
@@ -149,7 +148,7 @@ impl<'short, 'long: 'short> BuildConfig<'long> {
                 .stdout(Stdio::piped())
                 .env("LD_LIBRARY_PATH", self.get_rustlib_path())
                 .spawn()
-                .expect("Fatal, cannot spawn scanner output");
+                .expect("Fatal, cannot spawn scanner");
 
             {
                 let mut stdin = scanner
@@ -176,7 +175,9 @@ impl<'short, 'long: 'short> BuildConfig<'long> {
             // println!("[Debug - filter_rufs] stdout: {stdout}");
             if let Some(caps) = RE_USEDFEATS.captures(&stdout) {
                 used_rufs.extend(UsedRufs::from(
-                    caps.get(1).expect("Fatal, resolve ruf fails").as_str(),
+                    caps.get(1)
+                        .expect("Fatal, cannot filter ruf usage")
+                        .as_str(),
                 ));
             }
         }
@@ -184,7 +185,7 @@ impl<'short, 'long: 'short> BuildConfig<'long> {
         Ok(used_rufs)
     }
 
-    /// Check whether rufs is usable in current configurations
+    /// Check whether rufs is usable in current configurations.
     pub fn rufs_usable(&self, rufs: &UsedRufs) -> bool {
         assert!(self.rust_version < basic_usages::ruf_lifetime::RUSTC_VER_NUM as u32);
         if rufs
@@ -199,7 +200,7 @@ impl<'short, 'long: 'short> BuildConfig<'long> {
         return true;
     }
 
-    /// Get usable rustc versions for rufs
+    /// Get usable rustc versions for given rufs.
     pub fn usable_rustc_for_rufs(&self, rufs: &UsedRufs) -> HashSet<u32> {
         let mut usable_rustc = HashSet::from_iter(0..RUSTC_VER_NUM as u32);
         for ruf in rufs.iter() {
@@ -231,22 +232,8 @@ impl<'short, 'long: 'short> BuildConfig<'long> {
         )
     }
 
-    pub fn get_rustc_spec(&self) -> &str {
-        get_nightly_version(self.rust_version)
-    }
-
     pub fn get_cargo_args(&'long self) -> Option<&'short [String]> {
         self.cargo_args
-    }
-
-    #[inline]
-    pub fn set_newer_fix(&mut self, newer_fix: bool) {
-        self.newer_fix = newer_fix
-    }
-
-    #[inline]
-    pub fn is_newer_fix(&self) -> bool {
-        self.newer_fix
     }
 
     #[inline]
@@ -273,11 +260,6 @@ impl<'short, 'long: 'short> BuildConfig<'long> {
     pub fn set_test(&mut self, test: bool) {
         self.test = test
     }
-
-    // #[inline]
-    // pub fn is_test(&self) -> bool {
-    //     self.test
-    // }
 }
 
 // #[test]

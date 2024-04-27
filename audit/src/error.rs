@@ -1,8 +1,12 @@
+//! This file describe errors may meet.
+
 use std::fmt::Display;
 
 #[derive(Debug)]
 pub enum AuditError {
+    /// Not our issues, maybe cargo or other commands fails.
     Unexpected(String),
+    /// Our tool fails
     Functionality(String),
 }
 

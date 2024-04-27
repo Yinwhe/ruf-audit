@@ -57,7 +57,7 @@ fn check_rufs(
     if !config.is_quick_fix() {
         info_print!(queit, "\tIssue", "ruf issues exist, try dep tree fix first");
         // if not quick fix, we will do this, since dep tree fix can be hard and slow
-        let err = match fix_with_dep(&mut config, used_rufs, &mut dm, queit) {
+        let err = match slow_fix(&mut config, used_rufs, &mut dm, queit) {
             Ok(()) => {
                 info_print!(
                     queit,
@@ -101,109 +101,6 @@ fn check_rufs(
     return Err(err);
 }
 
-fn fix_with_dep(
-    config: &mut BuildConfig,
-    mut used_rufs: HashMap<String, UsedRufs>,
-    dm: &mut DepManager,
-    queit: bool,
-) -> Result<(), AuditError> {
-    // this algo will ends, because we have a finite number of crates
-    // and each time we slim down the candidates.
-    // println!("[Debug - fix_with_dep] used_rufs: {used_rufs:?}");
-
-    loop {
-        let graph = dm.graph();
-        let root = dm.root();
-        let mut issued_depnx = None;
-
-        let mut bfs = visit::Bfs::new(&graph, root);
-        while let Some(nx) = bfs.next(&graph) {
-            let node = &graph[nx];
-            // println!("[Debug - fix_with_dep] check package {}", node.name);
-            // though we record all used crates, `Cargo.lock` seems to record optional deps too.
-            if let Some(rufs) = used_rufs.get(&node.name.as_str().replace("-", "_")) {
-                if !config.rufs_usable(&rufs) {
-                    issued_depnx = Some(nx);
-                    break;
-                }
-            }
-        }
-
-        if issued_depnx.is_none() {
-            // no rufs issue found (but other problem may exists)
-            return Ok(());
-        }
-
-        // We found a ruf issue
-        let issued_depnx = issued_depnx.unwrap();
-        let issued_dep = &graph[issued_depnx];
-
-        warn_print!(
-            queit,
-            "\tDetect",
-            &format!("dep '{}' cause ruf issues, try fixing", issued_dep.name)
-        );
-
-        // Canditate versions, restricted by semver, no rufs checks
-        let candidate_vers = dm.get_candidates(issued_depnx)?;
-
-        // here we check rufs
-        let mut usable_vers = vec![];
-        for cad in candidate_vers {
-            let used_rufs = config.filter_rufs(issued_dep.name.as_str(), cad.1)?;
-            // println!("[Debug - fix_with_dep] filter {} - {:?}", cad.0.to_string(), used_rufs);
-            if config.rufs_usable(&used_rufs) {
-                usable_vers.push(cad.0);
-            }
-        }
-
-        // donw fix first
-        // println!(
-        //     "[Debug - fix_with_dep] usable: {:?}",
-        //     usable_vers
-        //         .iter()
-        //         .map(|v| v.to_string())
-        //         .collect::<Vec<String>>()
-        // );
-        let choose = if config.is_newer_fix() {
-            usable_vers.into_iter().max()
-        } else {
-            usable_vers.into_iter().min()
-        };
-        if let Some(fix_ver) = choose {
-            let name = issued_dep.name.to_string();
-            let ver = issued_dep.version.to_string();
-            let fix_ver = fix_ver.to_string();
-
-            info_print!(
-                queit,
-                "\tFixing",
-                &format!("changing {name}@{ver} to {name}@{fix_ver}")
-            );
-            // Here previous graph and issue_dep are droped, we have to copy rather than borrow.
-            dm.update_pkg(&name, &ver, &fix_ver)?;
-
-            info_print!(queit, "\tFixing", "rechecking ruf issues");
-            used_rufs = extract(config, queit)?;
-        } else {
-            // No usable version, maybe parents' version not compatible, we do up fix.
-            warn_print!(queit, "\tFixing", &format!("no candidates found, do upfix"));
-            match up_fix(config, issued_depnx, dm, queit) {
-                Ok(_) => {
-                    info_print!(queit, "\tUpfixing", "rechecking ruf issues");
-                    used_rufs = extract(config, queit)?;
-                }
-                Err(e) => {
-                    if !e.is_unexpected() {
-                        // TODO: Print fail paths
-                    }
-                    return Err(e);
-                }
-            }
-        }
-    }
-}
-
 fn up_fix(
     config: &mut BuildConfig,
     issued_depnx: NodeIndex,
@@ -211,8 +108,8 @@ fn up_fix(
     queit: bool,
 ) -> Result<(), AuditError> {
     // check which parent shall be updated.
-    let p_reqs = match dm.req_by(&issued_depnx) {
-        Some(reqs) => reqs,
+    let p_req = match dm.req_by(&issued_depnx) {
+        Some(req) => req,
         None => {
             // already root crates, up fix fails
             return Err(AuditError::Functionality(format!(
@@ -222,11 +119,9 @@ fn up_fix(
     };
 
     let mut fix_one = false;
-
-    assert!(p_reqs.len() > 0, "no depdents found");
-    for p in &p_reqs {
-        let p_pkg = &dm.graph()[p.to_owned()];
-        let p_candidates_vers = dm.get_candidates_up_fix(p.clone(), issued_depnx.clone())?;
+    {
+        let p_pkg = &dm.graph()[p_req.to_owned()];
+        let p_candidates_vers = dm.get_candidates_up_fix(p_req.clone(), issued_depnx.clone())?;
 
         let mut usable_vers = vec![];
         for cad in p_candidates_vers {
@@ -236,11 +131,7 @@ fn up_fix(
             }
         }
 
-        let choose = if config.is_newer_fix() {
-            usable_vers.into_iter().max()
-        } else {
-            usable_vers.into_iter().min()
-        };
+        let choose = usable_vers.into_iter().max();
         if let Some(fix_ver) = choose {
             let name = p_pkg.name.to_string();
             let ver = p_pkg.version.to_string();
@@ -249,15 +140,13 @@ fn up_fix(
             info_print!(
                 queit,
                 "\tUpfixing",
-                &format!("changing {name}@{ver} to {name}@{fix_ver}")
+                &format!("downgrading {name}@{ver} to {name}@{fix_ver}")
             );
             // Here previous graph and issue_dep are droped, we have to copy rather than borrow.
             dm.update_pkg(&name, &ver, &fix_ver)?;
 
             fix_one = true;
-            break;
         }
-        // dependent cannot be fixed too, check next p first, if exists
     }
 
     if fix_one {
@@ -266,16 +155,13 @@ fn up_fix(
     }
 
     // or, maybe we have to nested upfix
-    for p in p_reqs {
-        match up_fix(config, p, dm, queit) {
-            Ok(_) => {
-                fix_one = true;
-                break;
-            }
-            Err(e) => {
-                if e.is_unexpected() {
-                    return Err(e);
-                }
+    match up_fix(config, p_req, dm, queit) {
+        Ok(_) => {
+            fix_one = true;
+        }
+        Err(e) => {
+            if e.is_unexpected() {
+                return Err(e);
             }
         }
     }
@@ -359,6 +245,147 @@ fn fix_with_rustc(
     })
 }
 
+/// We do minimal tree and find a usable rustc.
+/// The lockfile may not be buildable, but can prove fixability in some degree.
+fn quick_fix(config: &mut BuildConfig, queit: bool) -> Result<u32, AuditError> {
+    // we restore the dep tree to its minimal configurations, which is, all oldest.
+    let mut cargo: std::process::Command = spec_cargo(RUSTV);
+    cargo.args(["generate-lockfile", "-Z", "minimal-versions"]);
+    let output = cargo
+        .output()
+        .map_err(|e| AuditError::Unexpected(format!("cannot run cargo generate-lockfile: {e}")))?;
+
+    if !output.status.success() {
+        return Err(AuditError::Unexpected(format!(
+            "failed to generate a minimal dependency tree"
+        )));
+    }
+
+    // recheck all used rufs
+    let used_rufs = extract(config, queit)?;
+
+    let mut usable_rustc = HashSet::from_iter(0..=63);
+    for rufs in used_rufs.into_values() {
+        let rustc_versions = config.usable_rustc_for_rufs(&rufs);
+        if rustc_versions.is_empty() {
+            return Err(AuditError::Functionality(
+                "cannot find usable rustc version for current configurations".to_string(),
+            ));
+        }
+        usable_rustc = usable_rustc
+            .intersection(&rustc_versions)
+            .cloned()
+            .collect();
+    }
+
+    usable_rustc.iter().max().cloned().ok_or_else(|| {
+        AuditError::Functionality(
+            "cannot find usable rustc version for current configurations".to_string(),
+        )
+    })
+}
+
+fn slow_fix(
+    config: &mut BuildConfig,
+    mut used_rufs: HashMap<String, UsedRufs>,
+    dm: &mut DepManager,
+    queit: bool,
+) -> Result<(), AuditError> {
+    // This algo will ends, because we have a finite number of crates
+    // and each time we slim down the candidates.
+
+    // println!("[Debug - fix_with_dep] used_rufs: {used_rufs:?}");
+
+    loop {
+        // We do bfs and thus fix problems up to down.
+        let graph = dm.graph();
+        let root = dm.root();
+        let mut issued_depnx = None;
+
+        let mut bfs = visit::Bfs::new(&graph, root);
+        while let Some(nx) = bfs.next(&graph) {
+            let node = &graph[nx];
+            // println!("[Debug - fix_with_dep] check package {}", node.name);
+            if let Some(rufs) = used_rufs.get(&node.name.as_str().replace("-", "_")) {
+                if !config.rufs_usable(&rufs) {
+                    issued_depnx = Some(nx);
+                    break;
+                }
+            }
+        }
+
+        if issued_depnx.is_none() {
+            // No rufs issue found (but other problem may exists).
+            return Ok(());
+        }
+
+        // We found a ruf issue
+        let issued_depnx = issued_depnx.unwrap();
+        let issued_dep = &graph[issued_depnx];
+
+        warn_print!(
+            queit,
+            "\tDetect",
+            &format!("dep '{}' cause ruf issues, try fixing", issued_dep.name)
+        );
+
+        // Canditate versions, restricted by semver, no rufs checks beed done.
+        let candidate_vers = dm.get_candidates(issued_depnx)?;
+
+        // And here we check rufs.
+        let mut usable_vers = vec![];
+        for cad in candidate_vers {
+            let used_rufs = config.filter_rufs(issued_dep.name.as_str(), cad.1)?;
+            // println!("[Debug - fix_with_dep] filter {} - {:?}", cad.0.to_string(), used_rufs);
+            if config.rufs_usable(&used_rufs) {
+                usable_vers.push(cad.0);
+            }
+        }
+
+        // println!(
+        //     "[Debug - fix_with_dep] usable: {:?}",
+        //     usable_vers
+        //         .iter()
+        //         .map(|v| v.to_string())
+        //         .collect::<Vec<String>>()
+        // );
+        // invoke donw fix first.
+        let choose = usable_vers.into_iter().max();
+        if let Some(fix_ver) = choose {
+            let name = issued_dep.name.to_string();
+            let ver = issued_dep.version.to_string();
+            let fix_ver = fix_ver.to_string();
+
+            info_print!(
+                queit,
+                "\tFixing",
+                &format!("downgrading {name}@{ver} to {name}@{fix_ver}")
+            );
+
+            // Here previous graph and issue_dep are droped, we have to copy rather than borrow.
+            dm.update_pkg(&name, &ver, &fix_ver)?;
+
+            info_print!(queit, "\tFixing", "rechecking ruf issues");
+            used_rufs = extract(config, queit)?;
+        } else {
+            // No usable version, maybe parents need relax, we do up fix.
+            warn_print!(queit, "\tFixing", &format!("no candidates found, do upfix"));
+            match up_fix(config, issued_depnx, dm, queit) {
+                Ok(_) => {
+                    info_print!(queit, "\tUpfixing", "rechecking ruf issues");
+                    used_rufs = extract(config, queit)?;
+                }
+                Err(e) => {
+                    if !e.is_unexpected() {
+                        // TODO: Print fail paths
+                    }
+                    return Err(e);
+                }
+            }
+        }
+    }
+}
+
 /*
 pub fn test(mut config: BuildConfig) -> i32 {
     // config.set_newer_fix(true);
@@ -415,7 +442,6 @@ pub fn test(mut config: BuildConfig) -> i32 {
     }
 }
 */
-
 
 // test without build check
 pub fn test(mut config: BuildConfig) -> i32 {
